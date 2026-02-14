@@ -8,9 +8,9 @@ import numpy as np
 
 from bitstring import BitArray
 
-from alphazoo.utils.Caches.cache import Cache
+from alphazoo.utils.caches.cache import Cache
 
-from alphazoo.utils.Progress_Bars.print_bar import PrintBar
+from alphazoo.utils.progress_bars.print_bar import PrintBar
 
 '''
 The way it works:

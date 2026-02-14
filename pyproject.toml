@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
-    {name = "Guilherme", email = ""}
+    {name = "Guilherme"}
 ]
 keywords = ["reinforcement-learning", "alphazero", "mcts", "pettingzoo", "self-play"]
 classifiers = [
@@ -57,9 +57,24 @@ Documentation = "https://github.com/guilherme439/alphazoo#readme"
 Repository = "https://github.com/guilherme439/alphazoo"
 "Bug Tracker" = "https://github.com/guilherme439/alphazoo/issues"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["alphazoo*"]
+[tool.setuptools.package-dir]
+alphazoo = "main"
+
+[tool.setuptools]
+packages = [
+    "alphazoo",
+    "alphazoo.configs",
+    "alphazoo.search",
+    "alphazoo.training",
+    "alphazoo.testing",
+    "alphazoo.testing.agents",
+    "alphazoo.testing.agents.generic",
+    "alphazoo.utils",
+    "alphazoo.utils.caches",
+    "alphazoo.utils.functions",
+    "alphazoo.utils.progress_bars",
+    "alphazoo.wrappers",
+]
 
 [tool.black]
 line-length = 100

@@ -77,6 +77,8 @@ class Gamer():
             game.store_search_statistics(root_node)
             if keep_subtree:
                 root_node = chosen_child
+            else:
+                root_node = Node(0)
 
             stats["average_children"] += node_children
             stats["average_tree_size"] += tree_size

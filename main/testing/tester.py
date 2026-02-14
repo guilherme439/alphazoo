@@ -7,12 +7,10 @@ import numpy as np
 from progress.bar import ChargingBar
 from progress.spinner import PieSpinner
 
-from alphazoo.utils.Progress_Bars.print_bar import PrintBar
+from alphazoo.utils.progress_bars.print_bar import PrintBar
 
-from alphazoo.games.Tic_Tac_Toe.tic_tac_toe import tic_tac_toe
-
-from alphazoo.testing.Agents.Generic.mcts_agent import MctsAgent
-from alphazoo.testing.Agents.Generic.policy_agent import PolicyAgent
+from alphazoo.testing.agents.generic.mcts_agent import MctsAgent
+from alphazoo.testing.agents.generic.policy_agent import PolicyAgent
 
 
 

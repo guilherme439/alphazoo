@@ -160,10 +160,10 @@ class AlphaZero():
 
         self.network_name = self.train_config["Initialization"]["network_name"]
 
-        self.game_folder_name = "Games/" + self.game_class().get_dirname()
+        self.game_folder_name = "Games/" + self.game_name
         self.network_folder_path = self.game_folder_name + "/models/" + self.network_name + "/"
         if not os.path.exists(self.network_folder_path):
-            os.mkdir(self.network_folder_path)
+            os.makedirs(self.network_folder_path)
         elif self.fresh_start:
             print("\nWARNING: Starting fresh on an already existing network folder!")
             print("All previous files will be replaced!")
@@ -551,8 +551,9 @@ class AlphaZero():
             while games_played < num_games_per_type:
                 
                 stats, cache = actor_pool.get_next_unordered()
-                avg_hit_ratio += cache.get_hit_ratio()
-                avg_cache_len += cache.length()
+                if cache is not None:
+                    avg_hit_ratio += cache.get_hit_ratio()
+                    avg_cache_len += cache.length()
                 stats_list.append(stats)
                 games_played += 1
                 bar.next()

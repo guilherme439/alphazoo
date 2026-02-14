@@ -1,0 +1,76 @@
+Initialization:
+  network_name: "test_network"
+  load_checkpoint: false
+
+Scheduler:
+  starting_lr: 0.001
+  scheduler_boundaries: [100]
+  scheduler_gamma: 0.1
+
+Optimizer:
+  optimizer_choice: "Adam"
+  SGD:
+    weight_decay: 0.0001
+    momentum: 0.9
+    nesterov: true
+
+Running:
+  running_mode: "sequential"
+  num_actors: 1
+  early_fill_per_type: 2
+  training_steps: 10
+  early_softmax_moves: 100
+  early_softmax_exploration: 1.0
+  early_random_exploration: 0.0
+  Sequential:
+    num_games_per_type_per_step: 2
+
+Cache:
+  cache_choice: "disabled"
+  max_size: 1000
+  keep_updated: false
+
+Saving:
+  save_frequency: 100
+  storage_frequency: 1
+  save_buffer: false
+
+Recurrent Options:
+  train_iterations: [1]
+  pred_iterations: [[1]]
+  test_iterations: 1
+  alpha: 1.0
+
+Testing:
+  asynchronous_testing: false
+  testing_actors: 1
+  early_testing: false
+  policy_test_frequency: 0
+  mcts_test_frequency: 0
+  num_policy_test_games: 0
+  num_mcts_test_games: 0
+  test_game_index: 0
+
+Plotting:
+  plot_frequency: 0
+  recent_steps_loss: 10
+  plot_loss: false
+  plot_weights: false
+
+Learning:
+  shared_storage_size: 3
+  replay_window_size: 500
+  learning_method: "epochs"
+  batch_extraction: "local"
+  value_loss: "SE"
+  policy_loss: "KLD"
+  normalize_cel: false
+  Epochs:
+    batch_size: 32
+    learning_epochs: 1
+    plot_epochs: false
+  Samples:
+    batch_size: 32
+    num_samples: 100
+    late_heavy: false
+    with_replacement: true

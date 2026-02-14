@@ -1,6 +1,6 @@
 
 import numpy as np
-from alphazoo.testing.Agents.agent import Agent
+from alphazoo.testing.agents.agent import Agent
 
 class RandomAgent(Agent):
     ''' Chooses actions at random (within legal actions)'''

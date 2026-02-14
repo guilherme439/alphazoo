@@ -1,5 +1,5 @@
 
-from alphazoo.utils.Caches.cache import Cache
+from alphazoo.utils.caches.cache import Cache
 
 class DictCache(Cache):
     ''' Cache implemented based on python dictionaries '''

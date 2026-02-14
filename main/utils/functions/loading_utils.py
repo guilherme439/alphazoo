@@ -4,7 +4,7 @@ import glob
 import pickle
 import torch
 
-from alphazoo.network_manager.network_manager import Network_Manager
+from alphazoo.network_manager import Network_Manager
 
 
 

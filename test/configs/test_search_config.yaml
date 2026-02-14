@@ -1,0 +1,17 @@
+Simulation:
+  mcts_simulations: 8
+  keep_subtree: false
+
+UCT:
+  pb_c_base: 10000
+  pb_c_init: 1.15
+
+Exploration:
+  number_of_softmax_moves: 5
+  epsilon_softmax_exploration: 0.04
+  epsilon_random_exploration: 0.003
+  value_factor: 1.0
+  root_exploration_distribution: "dirichlet"
+  root_exploration_fraction: 0.25
+  root_dist_alpha: 0.3
+  root_dist_beta: 1.0
