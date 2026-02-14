@@ -213,41 +213,8 @@ class Explorer():
         self.config = search_config
         return    
 
-    def print_tree(self, root, action_space_shape):
-        # Debug
-        buffer = []
-        print("\nRoot -> ")
-        buffer.append((root, None, 0, None, 0))
-
-        identifier = 0
-        last_pid = 0    # pid -> parent id
-        while len(buffer) > 0:
-            identifier +=1
-            (node, parent, p_id, action_coords, level) = buffer.pop(0)
-            if last_pid != p_id:
-                print("\n-\n")
-            last_pid = p_id
-            value_score = node.value()
-
-
-            if parent:
-                ucbScore = self.score(parent, node)
-                print("Level: " + str(level) + " Parent_id: " + str(p_id) + " Node_id: " + format(identifier, '2') + 
-                      " V: " + format(value_score, '.02') + " U: " + format(ucbScore, '.2') + " Visits: " + str(node.visit_count) +
-                      " To_play: " + str(node.to_play) + " Terminal: " + str(node.terminal_value) + " NN_Prior: " + format(node.prior, '.02'))
-            else:
-                print("Node_id: " + str(identifier) + " Level: " + str(level) + " V: " + format(value_score, '.02') + " To_play: " + str(node.to_play))
-            
-            
-            for (a, child) in node.children.items():
-                if child.to_play!=-1:
-                    act = np.unravel_index(a, action_space_shape)
-                    buffer.append((child, node, identifier, act, level+1))		
-        
-
-        return
     
-    def __str__():
+    def __str__(self):
         return "                                                                \n \
     ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣤⣴⣶⣶⣿⣿⣿⣿⣿⣷⣶⣶⣦⣤⡀⠀⠀       \n \
     ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀\n \
