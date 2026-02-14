@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
-    {name = "Guilherme"}
+    {name = "Guilherme Palma"}
 ]
 keywords = ["reinforcement-learning", "alphazero", "mcts", "pettingzoo", "self-play"]
 classifiers = [
@@ -22,40 +22,17 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-
-dependencies = [
-    "numpy>=1.24.0",
-    "torch>=2.0.0",
-    "pettingzoo>=1.24.0",
-    "gymnasium>=0.29.0",
-    "ray>=2.7.0",
-    "scipy>=1.11.0",
-    "ruamel.yaml>=0.17.0",
-    "psutil>=5.9.0",
-    "termcolor>=2.3.0",
-    "progress>=1.6",
-    "more_itertools>=9.0.0",
-    "cityhash>=0.2.3",
-    "metrohash>=0.0.6",
-    "bitstring>=3.1.9",
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.4.0",
-    "pytest-cov>=4.1.0",
-    "black>=23.7.0",
-    "ruff>=0.0.285",
-]
-plotting = [
-    "matplotlib>=3.7.0",
-]
+dynamic = ["dependencies", "optional-dependencies"]
 
 [project.urls]
 Homepage = "https://github.com/guilherme439/alphazoo"
 Documentation = "https://github.com/guilherme439/alphazoo#readme"
 Repository = "https://github.com/guilherme439/alphazoo"
 "Bug Tracker" = "https://github.com/guilherme439/alphazoo/issues"
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+optional-dependencies.dev = {file = ["requirements-dev.txt"]}
 
 [tool.setuptools.package-dir]
 alphazoo = "main"

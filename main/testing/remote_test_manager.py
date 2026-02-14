@@ -1,6 +1,6 @@
 import ray
 
-from alphazoo.testing.test_manager import TestManager
+from .test_manager import TestManager
 
 @ray.remote
 class RemoteTestManager(TestManager):

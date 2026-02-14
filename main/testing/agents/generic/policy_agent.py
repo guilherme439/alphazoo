@@ -1,10 +1,10 @@
 import numpy as np
 from scipy.special import softmax
 
-from alphazoo.testing.agents.agent import Agent
+from ..agent import Agent
 
-from alphazoo.utils.caches.dict_cache import DictCache
-from alphazoo.utils.caches.keyless_cache import KeylessCache
+from ....utils.caches.dict_cache import DictCache
+from ....utils.caches.keyless_cache import KeylessCache
     
 
 class PolicyAgent(Agent):

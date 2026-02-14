@@ -21,26 +21,26 @@ from copy import deepcopy
 from random import randrange
 import more_itertools
 
-from alphazoo.network_manager import Network_Manager
+from ..network_manager import Network_Manager
 
-from alphazoo.training.gamer import Gamer
-from alphazoo.training.replay_buffer import ReplayBuffer
-from alphazoo.utils.remote_storage import RemoteStorage
-from alphazoo.testing.remote_tester import RemoteTester
-from alphazoo.testing.test_manager import TestManager
-from alphazoo.testing.remote_test_manager import RemoteTestManager
+from .gamer import Gamer
+from .replay_buffer import ReplayBuffer
+from ..utils.remote_storage import RemoteStorage
+from ..testing.remote_tester import RemoteTester
+from ..testing.test_manager import TestManager
+from ..testing.remote_test_manager import RemoteTestManager
 
-from alphazoo.testing.agents.generic.policy_agent import PolicyAgent
-from alphazoo.testing.agents.generic.mcts_agent import MctsAgent
-from alphazoo.testing.agents.generic.random_agent import RandomAgent
+from ..testing.agents.generic.policy_agent import PolicyAgent
+from ..testing.agents.generic.mcts_agent import MctsAgent
+from ..testing.agents.generic.random_agent import RandomAgent
 
-from alphazoo.utils.functions.loss_functions import *
-from alphazoo.utils.functions.general_utils import *
-from alphazoo.utils.functions.loading_utils import *
-from alphazoo.utils.functions.stats_utils import *
-from alphazoo.utils.functions.yaml_utils import *
+from ..utils.functions.loss_functions import *
+from ..utils.functions.general_utils import *
+from ..utils.functions.loading_utils import *
+from ..utils.functions.stats_utils import *
+from ..utils.functions.yaml_utils import *
 
-from alphazoo.utils.progress_bars.print_bar import PrintBar
+from ..utils.progress_bars.print_bar import PrintBar
 
 from progress.bar import ChargingBar
 from progress.spinner import PieSpinner

@@ -9,26 +9,26 @@ import matplotlib.pyplot as plt
 import ruamel
 from ruamel.yaml import YAML
 
-from alphazoo.network_manager import Network_Manager
+from ..network_manager import Network_Manager
 
-from alphazoo.utils.remote_storage import RemoteStorage
+from ..utils.remote_storage import RemoteStorage
 
-from alphazoo.training.replay_buffer import ReplayBuffer
+from ..training.replay_buffer import ReplayBuffer
 
-from alphazoo.utils.functions.loss_functions import *
-from alphazoo.utils.functions.general_utils import *
-from alphazoo.utils.functions.loading_utils import *
-from alphazoo.utils.functions.ray_utils import *
-from alphazoo.utils.functions.stats_utils import *
-from alphazoo.utils.functions.yaml_utils import *
-from alphazoo.utils.progress_bars.print_bar import PrintBar
+from ..utils.functions.loss_functions import *
+from ..utils.functions.general_utils import *
+from ..utils.functions.loading_utils import *
+from ..utils.functions.ray_utils import *
+from ..utils.functions.stats_utils import *
+from ..utils.functions.yaml_utils import *
+from ..utils.progress_bars.print_bar import PrintBar
 
-from alphazoo.testing.tester import Tester
-from alphazoo.testing.remote_tester import RemoteTester
+from .tester import Tester
+from .remote_tester import RemoteTester
 
-from alphazoo.testing.agents.generic.random_agent import RandomAgent
-from alphazoo.testing.agents.generic.policy_agent import PolicyAgent
-from alphazoo.testing.agents.generic.mcts_agent import MctsAgent
+from .agents.generic.random_agent import RandomAgent
+from .agents.generic.policy_agent import PolicyAgent
+from .agents.generic.mcts_agent import MctsAgent
 
 
 class TestManager():
@@ -50,9 +50,6 @@ class TestManager():
         self.render_choice = render_choice
         live_render = True if render_choice == "live" else False
         self.visual_tester = Tester(slow, print, live_render)
-        if render_choice == "analysis":
-            from alphazoo.games.SCS.SCS_Renderer import SCS_Renderer
-            self.renderer = SCS_Renderer()
 
     def create_tester_pool(self, num_actors):
         ''' creates tester pool meant to run multiple tests in parallel '''
@@ -311,7 +308,7 @@ class TestManager():
             
 
         elif agent_type == "goal_rush":
-            from alphazoo.testing.agents.SCS.GoalRushAgent import GoalRushAgent
+            from .agents.SCS.GoalRushAgent import GoalRushAgent
             agent = GoalRushAgent()
         
         elif agent_type == "random":

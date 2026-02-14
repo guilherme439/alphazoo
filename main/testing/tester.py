@@ -7,10 +7,10 @@ import numpy as np
 from progress.bar import ChargingBar
 from progress.spinner import PieSpinner
 
-from alphazoo.utils.progress_bars.print_bar import PrintBar
+from ..utils.progress_bars.print_bar import PrintBar
 
-from alphazoo.testing.agents.generic.mcts_agent import MctsAgent
-from alphazoo.testing.agents.generic.policy_agent import PolicyAgent
+from .agents.generic.mcts_agent import MctsAgent
+from .agents.generic.policy_agent import PolicyAgent
 
 
 
@@ -21,16 +21,7 @@ class Tester():
 
         self.slow = slow
         self.print = print
-
-        self.passive_render = passive_render
-        if self.passive_render:
-            self.slow=True
-            # Render is only supported for SCS games
-            from alphazoo.games.SCS.SCS_RemoteRenderer import SCS_RemoteRenderer
-            from alphazoo.utils.remote_storage import RemoteStorage
-
-            self.remote_storage = RemoteStorage.remote(window_size=1)
-            self.renderer = SCS_RemoteRenderer.remote(self.remote_storage)
+        self.passive_render = False
 
         self.slow_duration = 2
 

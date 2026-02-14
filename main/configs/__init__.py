@@ -5,8 +5,8 @@ These dataclasses provide type safety and IDE autocomplete for configuration,
 while maintaining compatibility with YAML config files.
 """
 
-from alphazoo.configs.search_config import SearchConfig, SimulationConfig, UCTConfig, ExplorationConfig
-from alphazoo.configs.training_config import (
+from .search_config import SearchConfig, SimulationConfig, UCTConfig, ExplorationConfig
+from .training_config import (
     TrainingConfig,
     InitializationConfig,
     CheckpointConfig,

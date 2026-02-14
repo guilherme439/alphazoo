@@ -1,6 +1,6 @@
 import ray
 
-from alphazoo.testing.tester import Tester
+from .tester import Tester
 
 @ray.remote(scheduling_strategy="SPREAD")
 class RemoteTester(Tester):

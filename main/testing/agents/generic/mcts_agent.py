@@ -1,14 +1,14 @@
 import numpy as np
-from alphazoo.search.node import Node
-from alphazoo.search.explorer import Explorer
+from ....search.node import Node
+from ....search.explorer import Explorer
 
-from alphazoo.testing.agents.agent import Agent
+from ..agent import Agent
 
-from alphazoo.utils.functions.general_utils import *
-from alphazoo.utils.functions.loading_utils import *
-from alphazoo.utils.functions.ray_utils import *
-from alphazoo.utils.functions.stats_utils import *
-from alphazoo.utils.functions.yaml_utils import *
+from ....utils.functions.general_utils import *
+from ....utils.functions.loading_utils import *
+from ....utils.functions.ray_utils import *
+from ....utils.functions.stats_utils import *
+from ....utils.functions.yaml_utils import *
 
 
 class MctsAgent(Agent):

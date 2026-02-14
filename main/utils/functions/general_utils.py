@@ -1,7 +1,7 @@
 import torch
 
-from alphazoo.utils.caches.dict_cache import DictCache
-from alphazoo.utils.caches.keyless_cache import KeylessCache
+from ..caches.dict_cache import DictCache
+from ..caches.keyless_cache import KeylessCache
 
 
 

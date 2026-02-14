@@ -6,7 +6,7 @@ import torch
 
 from scipy.special import softmax
 
-from alphazoo.search.node import Node
+from .node import Node
 
 '''
 

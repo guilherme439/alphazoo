@@ -4,10 +4,10 @@ import time
 
 import numpy as np
 
-from alphazoo.search.node import Node
-from alphazoo.search.explorer import Explorer
+from ..search.node import Node
+from ..search.explorer import Explorer
 
-from alphazoo.utils.functions.general_utils import *
+from ..utils.functions.general_utils import *
 
 from functools import reduce
 
