@@ -11,6 +11,7 @@ from ..search.node import Node
 from ..search.explorer import Explorer
 from ..network_manager import Network_Manager
 from ..utils.caches.cache import Cache
+from ..configs.search_config import SearchConfig
 
 from ..utils.functions.general_utils import create_cache
 
@@ -25,7 +26,7 @@ class Gamer:
         game_class: type,
         game_args: tuple[Any, ...],
         game_index: int,
-        search_config: dict[str, Any],
+        search_config: SearchConfig,
         recurrent_iterations: int,
         cache_choice: str,
         size_estimate: int = 10000,
@@ -58,7 +59,7 @@ class Gamer:
         }
 
         game = self.game_class(*self.game_args)
-        keep_subtree: bool = self.search_config["Simulation"]["keep_subtree"]
+        keep_subtree: bool = self.search_config.simulation.keep_subtree
 
         if cache is None:
             cache = create_cache(self.cache_choice, self.size_estimate)

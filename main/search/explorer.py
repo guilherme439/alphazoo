@@ -10,6 +10,7 @@ from scipy.special import softmax
 from .node import Node
 from ..network_manager import Network_Manager
 from ..utils.caches.cache import Cache
+from ..configs.search_config import SearchConfig
 
 '''
 
@@ -35,7 +36,7 @@ from ..utils.caches.cache import Cache
 # The explorer runs searches.
 class Explorer:
 
-    def __init__(self, search_config: dict[str, Any], training: bool) -> None:
+    def __init__(self, search_config: SearchConfig, training: bool) -> None:
         self.config = search_config
         self.training = training
 
@@ -54,7 +55,7 @@ class Explorer:
         if self.training:
             self.add_exploration_noise(search_start)
 
-        num_searches: int = self.config["Simulation"]["mcts_simulations"]
+        num_searches: int = self.config.simulation.mcts_simulations
         for i in range(num_searches):
             node = search_start
             scratch_game = game.shallow_clone()
@@ -79,13 +80,13 @@ class Explorer:
         visit_counts: list[tuple[int, int]] = [(child.visit_count, action) for action, child in node.children.items()]
 
         if self.training:
-            if game.get_length() < self.config["Exploration"]["number_of_softmax_moves"]:
+            if game.get_length() < self.config.exploration.number_of_softmax_moves:
                 action_i = self.softmax_action(visit_counts)
             else:
                 epsilon_softmax = np.random.random()
                 epsilon_random = np.random.random()
-                softmax_threshold: float = self.config["Exploration"]["epsilon_softmax_exploration"]
-                random_threshold: float = self.config["Exploration"]["epsilon_random_exploration"]
+                softmax_threshold: float = self.config.exploration.epsilon_softmax_exploration
+                random_threshold: float = self.config.exploration.epsilon_random_exploration
 
                 if epsilon_softmax < softmax_threshold:
                     action_i = self.softmax_action(visit_counts)
@@ -110,8 +111,8 @@ class Explorer:
 
     def calculate_exploration_bias(self, node: Node) -> float:
         # Relative importance between value and prior as the game progresses
-        pb_c_base: float = self.config["UCT"]["pb_c_base"]
-        pb_c_init: float = self.config["UCT"]["pb_c_init"]
+        pb_c_base: float = self.config.uct.pb_c_base
+        pb_c_init: float = self.config.uct.pb_c_init
         return math.log((node.visit_count + pb_c_base + 1) / pb_c_base) + pb_c_init
 
     def calculate_ucb_factor(self, parent: Node, child: Node) -> float:
@@ -125,7 +126,7 @@ class Explorer:
         confidence_score = child.prior * ucb_factor
         confidence_score = confidence_score * c
 
-        value_factor: float = self.config["Exploration"]["value_factor"]
+        value_factor: float = self.config.exploration.value_factor
         value_score = child.value()
         if parent.to_play == 2:
             value_score = -value_score
@@ -199,17 +200,17 @@ class Explorer:
         return int(np.random.choice(actions, p=probs))
 
     def add_exploration_noise(self, node: Node) -> None:
-        dist_choice = self.config["Exploration"]["root_exploration_distribution"]
-        frac: float = self.config["Exploration"]["root_exploration_fraction"]
-        alpha: float = self.config["Exploration"]["root_dist_alpha"]
-        beta: float = self.config["Exploration"]["root_dist_beta"]
+        dist_choice = self.config.exploration.root_exploration_distribution
+        frac: float = self.config.exploration.root_exploration_fraction
+        alpha: float = self.config.exploration.root_dist_alpha
+        beta: float = self.config.exploration.root_dist_beta
 
         actions = node.children.keys()
         noise = np.random.gamma(alpha, beta, len(actions)) # Currently only gamma is supported
         for a, n in zip(actions, noise):
             node.children[a].prior = node.children[a].prior * (1 - frac) + n * frac
 
-    def set_search_config(self, search_config: dict[str, Any]) -> None:
+    def set_search_config(self, search_config: SearchConfig) -> None:
         self.config = search_config
 
     def __str__(self) -> str:

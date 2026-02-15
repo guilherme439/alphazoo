@@ -3,7 +3,6 @@ import os
 import torch
 import torch.nn as nn
 import numpy as np
-import yaml
 
 from pettingzoo.classic import connect_four_v3
 
@@ -15,6 +14,7 @@ from alphazoo.configs.alphazoo_config import (
     SamplesConfig, SchedulerConfig, OptimizerConfig, SGDConfig,
     InitializationConfig,
 )
+from alphazoo.configs import SearchConfig
 
 
 # --------------- Small Network --------------- #
@@ -60,9 +60,7 @@ def action_mask_fn(env: object) -> np.ndarray:
 def test_connect_four_training(work_dir: str) -> None:
     config_dir = os.path.join(os.path.dirname(__file__), "configs")
     search_config_path = os.path.join(config_dir, "test_search_config.yaml")
-
-    with open(search_config_path, "r") as f:
-        search_config = yaml.safe_load(f)
+    search_config = SearchConfig.from_yaml(search_config_path)
 
     config = AlphaZooConfig(
         initialization=InitializationConfig(network_name="test_network"),
@@ -100,6 +98,7 @@ def test_connect_four_training(work_dir: str) -> None:
             optimizer_choice="Adam",
             sgd=SGDConfig(weight_decay=0.0001, momentum=0.9, nesterov=True),
         ),
+        search=search_config,
     )
 
     def env_creator():
@@ -113,7 +112,6 @@ def test_connect_four_training(work_dir: str) -> None:
         game_class=PettingZooWrapper,
         game_args_list=game_args_list,
         config=config,
-        search_config=search_config,
         model=model,
     )
 

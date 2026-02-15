@@ -4,19 +4,18 @@ Search algorithm tests using a mock game for controlled, deterministic testing.
 
 import numpy as np
 import pytest
-import yaml
 import os
 
 from alphazoo.search.node import Node
 from alphazoo.search.explorer import Explorer
+from alphazoo.configs import SearchConfig
 from mocks import MockGame, MockNet, MockNetworkManager
 
 
 @pytest.fixture
 def search_config():
     config_path = os.path.join(os.path.dirname(__file__), "configs", "test_search_config.yaml")
-    with open(config_path) as f:
-        return yaml.safe_load(f)
+    return SearchConfig.from_yaml(config_path)
 
 
 # ================================================================== #
@@ -216,7 +215,7 @@ class TestRunMCTS:
         explorer = Explorer(search_config, training=False)
         root = Node(0)
         explorer.run_mcts(MockGame(), MockNetworkManager(MockNet()), root)
-        assert root.visit_count == search_config["Simulation"]["mcts_simulations"]
+        assert root.visit_count == search_config.simulation.mcts_simulations
 
     def test_preferred_action_gets_most_visits(self, search_config):
         explorer = Explorer(search_config, training=False)

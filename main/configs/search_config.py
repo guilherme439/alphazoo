@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 import yaml
@@ -32,9 +32,9 @@ class ExplorationConfig:
 
 @dataclass
 class SearchConfig:
-    simulation: SimulationConfig
-    uct: UCTConfig
-    exploration: ExplorationConfig
+    simulation: SimulationConfig = field(default_factory=SimulationConfig)
+    uct: UCTConfig = field(default_factory=UCTConfig)
+    exploration: ExplorationConfig = field(default_factory=ExplorationConfig)
 
     @classmethod
     def from_yaml(cls, path: str) -> SearchConfig:

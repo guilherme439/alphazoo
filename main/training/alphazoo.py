@@ -30,6 +30,7 @@ from ..utils.functions.loss_functions import KLDivergence, MSError, SquaredError
 from ..utils.functions.general_utils import create_cache, create_optimizer
 
 from ..configs.alphazoo_config import AlphaZooConfig
+from ..configs.search_config import SearchConfig
 
 StepCallback = Callable[["AlphaZoo", int, dict[str, Any]], None]
 LossFunction = Callable[[Tensor, Tensor], Tensor]
@@ -87,7 +88,6 @@ class AlphaZoo:
         game_class: type,
         game_args_list: list[tuple[Any, ...]],
         config: AlphaZooConfig,
-        search_config: dict[str, Any],
         model: nn.Module | None = None,
     ) -> None:
 
@@ -97,7 +97,6 @@ class AlphaZoo:
         self.game_name: str = self.example_game.get_dirname()
 
         self.config = config
-        self.search_config = search_config
 
         self.starting_step: int = 0
         self.load_buffer: bool = False
@@ -168,7 +167,7 @@ class AlphaZoo:
             print("All previous files will be replaced!")
             time.sleep(30)
 
-    def run(self, on_step_end: StepCallback | None = None) -> None:
+    def train(self, on_step_end: StepCallback | None = None) -> None:
         pid = os.getpid()
         process = psutil.Process(pid)
 
@@ -288,7 +287,7 @@ class AlphaZoo:
                 self.game_class,
                 self.game_args_list[0],
                 0,
-                self.search_config,
+                self.config.search,
                 pred_iterations[0],
                 cache_choice,
                 cache_max,
@@ -379,11 +378,11 @@ class AlphaZoo:
         pred_iterations_list = self.config.recurrent.pred_iterations
         num_actors = self.config.running.num_actors
 
-        search_config = deepcopy(self.search_config)
+        search_config = deepcopy(self.config.search)
         if early_fill:
-            search_config["Exploration"]["number_of_softmax_moves"] = self.config.running.early_softmax_moves
-            search_config["Exploration"]["epsilon_softmax_exploration"] = self.config.running.early_softmax_exploration
-            search_config["Exploration"]["epsilon_random_exploration"] = self.config.running.early_random_exploration
+            search_config.exploration.number_of_softmax_moves = self.config.running.early_softmax_moves
+            search_config.exploration.epsilon_softmax_exploration = self.config.running.early_softmax_exploration
+            search_config.exploration.epsilon_random_exploration = self.config.running.early_random_exploration
 
         total_games = self.num_game_types * num_games_per_type
         print(text)

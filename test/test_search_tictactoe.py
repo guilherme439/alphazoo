@@ -6,13 +6,13 @@ import torch.nn as nn
 import torch
 import numpy as np
 import pytest
-import yaml
 import os
 
 from pettingzoo.classic import tictactoe_v3
 
 from alphazoo.search.node import Node
 from alphazoo.search.explorer import Explorer
+from alphazoo.configs import SearchConfig
 from alphazoo.network_manager import Network_Manager
 from helpers import make_pettingzoo_game
 
@@ -34,8 +34,7 @@ class TicTacToeNet(nn.Module):
 @pytest.fixture
 def search_config():
     config_path = os.path.join(os.path.dirname(__file__), "configs", "test_search_config.yaml")
-    with open(config_path) as f:
-        return yaml.safe_load(f)
+    return SearchConfig.from_yaml(config_path)
 
 
 @pytest.fixture

@@ -1,5 +1,9 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Literal
+
+from .search_config import SearchConfig
 
 
 @dataclass
@@ -121,3 +125,4 @@ class AlphaZooConfig:
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     initialization: InitializationConfig = field(default_factory=InitializationConfig)
+    search: SearchConfig = field(default_factory=SearchConfig)
