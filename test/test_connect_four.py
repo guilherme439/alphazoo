@@ -115,6 +115,6 @@ def test_connect_four_training(work_dir: str) -> None:
         model=model,
     )
 
-    trainer.run()
+    trainer.train()
 
     assert os.path.exists(os.path.join(work_dir, "Games"))

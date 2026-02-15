@@ -14,7 +14,7 @@ from alphazoo.search.node import Node
 from alphazoo.search.explorer import Explorer
 from alphazoo.configs import SearchConfig
 from alphazoo.network_manager import Network_Manager
-from helpers import make_pettingzoo_game
+from .helpers import make_pettingzoo_game
 
 
 class TicTacToeNet(nn.Module):

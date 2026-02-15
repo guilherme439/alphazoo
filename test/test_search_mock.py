@@ -9,7 +9,7 @@ import os
 from alphazoo.search.node import Node
 from alphazoo.search.explorer import Explorer
 from alphazoo.configs import SearchConfig
-from mocks import MockGame, MockNet, MockNetworkManager
+from .mocks import MockGame, MockNet, MockNetworkManager
 
 
 @pytest.fixture

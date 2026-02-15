@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=45", "wheel", "setuptools_scm>=6.2"]
-build-backend = "setuptools.build_meta"
+requires = ["flit_core>=3.11,<4"]
+build-backend = "flit_core.buildapi"
 
 [project]
 name = "alphazoo"
@@ -9,9 +9,7 @@ description = "Standalone AlphaZero implementation with PettingZoo compatibility
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
-authors = [
-    {name = "Guilherme Palma"}
-]
+authors = [{name = "Guilherme Palma"}]
 keywords = ["reinforcement-learning", "alphazero", "mcts", "pettingzoo", "self-play"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -22,7 +20,6 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-dynamic = ["dependencies", "optional-dependencies"]
 
 [project.urls]
 Homepage = "https://github.com/guilherme439/alphazoo"
@@ -30,33 +27,29 @@ Documentation = "https://github.com/guilherme439/alphazoo#readme"
 Repository = "https://github.com/guilherme439/alphazoo"
 "Bug Tracker" = "https://github.com/guilherme439/alphazoo/issues"
 
-[tool.setuptools.dynamic]
-dependencies = {file = ["requirements.txt"]}
-optional-dependencies.dev = {file = ["requirements-dev.txt"]}
+[tool.flit.module]
+name = "alphazoo"
 
-[tool.setuptools.package-dir]
-alphazoo = "main"
-
-[tool.setuptools]
-packages = [
-    "alphazoo",
-    "alphazoo.configs",
-    "alphazoo.search",
-    "alphazoo.training",
-    "alphazoo.testing",
-    "alphazoo.testing.agents",
-    "alphazoo.testing.agents.generic",
-    "alphazoo.utils",
-    "alphazoo.utils.caches",
-    "alphazoo.utils.functions",
-    "alphazoo.utils.progress_bars",
-    "alphazoo.wrappers",
+dependencies = [
+    "numpy~=1.24",
+    "torch~=2.0",
+    "pettingzoo~=1.24",
+    "gymnasium~=0.29",
+    "ray~=2.7",
+    "scipy~=1.11",
+    "ruamel.yaml~=0.17",
+    "psutil~=5.9",
+    "termcolor~=2.3",
+    "progress~=1.6",
+    "more_itertools~=9.0",
+    "cityhash~=0.2",
+    "metrohash~=0.0.6",
+    "bitstring~=3.1",
 ]
 
-[tool.black]
-line-length = 100
-target-version = ['py310']
-
-[tool.ruff]
-line-length = 100
-target-version = "py310"
+[dependency-groups]
+test = [
+    "pytest~=7.4",
+    "pytest-cov~=4.1",
+    "pettingzoo[classic]~=1.24",
+]
