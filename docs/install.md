@@ -12,8 +12,8 @@ source venv/bin/activate  # Linux/macOS
 # Install the package in editable mode
 pip install -e .
 
-# Install with dev dependencies (testing, linting)
-pip install -e ".[dev]"
+# Install with test dependencies
+pip install -e . --dependency-groups test
 ```
 
 ## Running Tests
