@@ -1,51 +1,27 @@
 """
 AlphaZoo: Standalone AlphaZero implementation with PettingZoo compatibility
-
-This library provides a complete AlphaZero training and testing framework
-that works with PettingZoo environments.
 """
 
 __version__ = "0.1.0"
 
-# Core training
 from .training.alphazero import AlphaZero
 from .training.gamer import Gamer
 from .training.replay_buffer import ReplayBuffer
 
-# Search
 from .search.explorer import Explorer
 from .search.node import Node
 
-# Network manager (minimal wrapper)
 from .network_manager import Network_Manager
 
-# Testing
-from .testing.test_manager import TestManager
-from .testing.agents.agent import Agent
-from .testing.agents.generic.mcts_agent import MctsAgent
-from .testing.agents.generic.policy_agent import PolicyAgent
-from .testing.agents.generic.random_agent import RandomAgent
+from .configs.alphazero_config import AlphaZeroConfig
 
 __all__ = [
-    # Version
     "__version__",
-
-    # Training
     "AlphaZero",
     "Gamer",
     "ReplayBuffer",
-
-    # Search
     "Explorer",
     "Node",
-
-    # Networks
     "Network_Manager",
-
-    # Testing
-    "TestManager",
-    "Agent",
-    "MctsAgent",
-    "PolicyAgent",
-    "RandomAgent",
+    "AlphaZeroConfig",
 ]

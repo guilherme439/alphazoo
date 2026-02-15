@@ -10,7 +10,6 @@ from bitstring import BitArray
 
 from .cache import Cache
 
-from ..progress_bars.print_bar import PrintBar
 
 '''
 The way it works:
