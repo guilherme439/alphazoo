@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Literal, List, Optional, Callable
+from typing import Literal
 
 
 @dataclass
@@ -58,8 +58,8 @@ class SavingConfig:
 
 @dataclass
 class RecurrentConfig:
-    train_iterations: List[int] = field(default_factory=lambda: [1])
-    pred_iterations: List[int] = field(default_factory=lambda: [1])
+    train_iterations: list[int] = field(default_factory=lambda: [1])
+    pred_iterations: list[int] = field(default_factory=lambda: [1])
     test_iterations: int = 1
     alpha: float = 0.0
 
@@ -107,12 +107,12 @@ class OptimizerConfig:
 @dataclass
 class SchedulerConfig:
     starting_lr: float = 1.0e-4
-    boundaries: List[int] = field(default_factory=lambda: [10000, 20000])
+    boundaries: list[int] = field(default_factory=lambda: [10000, 20000])
     gamma: float = 0.2
 
 
 @dataclass
-class AlphaZeroConfig:
+class AlphaZooConfig:
     running: RunningConfig = field(default_factory=RunningConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
     learning: LearningConfig = field(default_factory=LearningConfig)

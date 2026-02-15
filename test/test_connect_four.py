@@ -1,4 +1,5 @@
 import os
+
 import torch
 import torch.nn as nn
 import numpy as np
@@ -7,9 +8,9 @@ import yaml
 from pettingzoo.classic import connect_four_v3
 
 from alphazoo.wrappers.pettingzoo_wrapper import PettingZooWrapper
-from alphazoo.training.alphazero import AlphaZero
-from alphazoo.configs.alphazero_config import (
-    AlphaZeroConfig, RunningConfig, SequentialConfig, CacheConfig,
+from alphazoo.training.alphazoo import AlphaZoo
+from alphazoo.configs.alphazoo_config import (
+    AlphaZooConfig, RunningConfig, SequentialConfig, CacheConfig,
     SavingConfig, RecurrentConfig, LearningConfig, EpochsConfig,
     SamplesConfig, SchedulerConfig, OptimizerConfig, SGDConfig,
     InitializationConfig,
@@ -19,7 +20,7 @@ from alphazoo.configs.alphazero_config import (
 # --------------- Small Network --------------- #
 
 class ConnectFourNet(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.recurrent = False
 
@@ -30,7 +31,7 @@ class ConnectFourNet(nn.Module):
         self.policy_head = nn.Linear(64, 7)
         self.value_head = nn.Linear(64, 1)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         x = x.permute(0, 3, 1, 2)
         x = torch.relu(self.conv1(x))
         x = torch.relu(self.conv2(x))
@@ -44,26 +45,26 @@ class ConnectFourNet(nn.Module):
 
 # --------------- Callbacks --------------- #
 
-def observation_to_state(obs, agent_id):
+def observation_to_state(obs: dict, agent_id: str) -> torch.Tensor:
     board = torch.tensor(obs["observation"], dtype=torch.float32)
     return board.unsqueeze(0)
 
 
-def action_mask_fn(env):
+def action_mask_fn(env: object) -> np.ndarray:
     obs = env.observe(env.agent_selection)
     return np.array(obs["action_mask"], dtype=np.float32)
 
 
 # --------------- Test --------------- #
 
-def test_connect_four_training(work_dir):
+def test_connect_four_training(work_dir: str) -> None:
     config_dir = os.path.join(os.path.dirname(__file__), "configs")
     search_config_path = os.path.join(config_dir, "test_search_config.yaml")
 
     with open(search_config_path, "r") as f:
         search_config = yaml.safe_load(f)
 
-    config = AlphaZeroConfig(
+    config = AlphaZooConfig(
         initialization=InitializationConfig(network_name="test_network"),
         running=RunningConfig(
             running_mode="sequential",
@@ -108,7 +109,7 @@ def test_connect_four_training(work_dir):
 
     model = ConnectFourNet()
 
-    trainer = AlphaZero(
+    trainer = AlphaZoo(
         game_class=PettingZooWrapper,
         game_args_list=game_args_list,
         config=config,

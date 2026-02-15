@@ -1,26 +1,29 @@
+from __future__ import annotations
+
+from typing import Any
+
+import torch
 
 from .cache import Cache
+
 
 class DictCache(Cache):
     ''' Cache implemented based on python dictionaries '''
 
-    def __init__(self, max_size):
+    def __init__(self, max_size: int) -> None:
         self.max_size = max_size
-        self.dict = {}
+        self.dict: dict[tuple[float, ...], Any] = {}
         self.num_items_to_remove = int(0.1 * self.max_size) # amount of items to remove when the dict gets full
         self.update_threshold = 0.7
 
         self.hits = 0
         self.misses = 0
 
-        return
-    
-    def contains(self, tensor_key):
+    def contains(self, tensor_key: torch.Tensor) -> bool:
         key = self.tensor_to_key(tensor_key)
-        value = self.dict.get(key)
-        return value is not None
-    
-    def get(self, tensor_key):
+        return self.dict.get(key) is not None
+
+    def get(self, tensor_key: torch.Tensor) -> Any | None:
         '''Returns the value for the key, or None if the key doesn't exist'''
         key = self.tensor_to_key(tensor_key)
         result = self.dict.get(key)
@@ -29,29 +32,27 @@ class DictCache(Cache):
         else:
             self.hits += 1
         return result
-    
-    def put(self, item):
-        (tensor_key, value) = item
+
+    def put(self, item: tuple[torch.Tensor, Any]) -> None:
+        tensor_key, value = item
         key = self.tensor_to_key(tensor_key)
 
         if len(self.dict) >= self.max_size:
             self.clear_space(self.num_items_to_remove)
 
         self.dict[key] = value
-        return
-    
-    def clear_space(self, num_items):
+
+    def clear_space(self, num_items: int) -> None:
         reverse_key_iterator = reversed(self.dict)
-        keys_to_remove = []
+        keys_to_remove: list[tuple[float, ...]] = []
         for i in range(num_items):
             key = next(reverse_key_iterator)
             keys_to_remove.append(key)
-            
+
         for key in keys_to_remove:
             self.dict.pop(key)
 
-
-    def update(self, cache):
+    def update(self, cache: Cache) -> None:
         if not isinstance(cache, DictCache):
             raise Exception("Can only update caches of the same type.")
 
@@ -60,31 +61,24 @@ class DictCache(Cache):
         if extra > 0:
             items_to_remove = extra + self.num_items_to_remove
             self.clear_space(items_to_remove)
-        return
-    
-    def get_update_threshold(self):
+
+    def get_update_threshold(self) -> float:
         return self.update_threshold
-    
-    def clear(self):
+
+    def clear(self) -> None:
         self.dict.clear()
         self.hits = 0
         self.misses = 0
-        return
-    
-    def length(self):
+
+    def length(self) -> int:
         ''' Returns the number of items in the cache '''
         return len(self.dict)
-    
-    def get_fill_ratio(self):
-        return self.length()/self.max_size
-    
-    def get_hit_ratio(self):
-        return self.hits/(self.hits + self.misses)
 
-    def tensor_to_key(self, tensor):
+    def get_fill_ratio(self) -> float:
+        return self.length() / self.max_size
+
+    def get_hit_ratio(self) -> float:
+        return self.hits / (self.hits + self.misses)
+
+    def tensor_to_key(self, tensor: torch.Tensor) -> tuple[float, ...]:
         return tuple(tensor.numpy().flatten())
-
-    
-    
-
-    

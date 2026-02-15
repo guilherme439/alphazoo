@@ -1,6 +1,6 @@
 from .search_config import SearchConfig, SimulationConfig, UCTConfig, ExplorationConfig
-from .alphazero_config import (
-    AlphaZeroConfig,
+from .alphazoo_config import (
+    AlphaZooConfig,
     RunningConfig,
     SequentialConfig,
     AsynchronousConfig,
@@ -22,7 +22,7 @@ __all__ = [
     "SimulationConfig",
     "UCTConfig",
     "ExplorationConfig",
-    "AlphaZeroConfig",
+    "AlphaZooConfig",
     "RunningConfig",
     "SequentialConfig",
     "AsynchronousConfig",
