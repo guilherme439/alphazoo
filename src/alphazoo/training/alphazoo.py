@@ -65,7 +65,14 @@ class AlphaZoo:
         nesterov = config.optimizer.sgd.nesterov
 
         self.latest_network = Network_Manager(model)
-        self.optimizer = create_optimizer(self.latest_network.get_model(), optimizer_name, starting_lr, weight_decay, momentum, nesterov)
+        self.optimizer = create_optimizer(
+            self.latest_network.get_model(),
+            optimizer_name, 
+            starting_lr, 
+            weight_decay, 
+            momentum, 
+            nesterov
+        )
         self.scheduler = MultiStepLR(self.optimizer, milestones=scheduler_boundaries, gamma=scheduler_gamma)
 
         if optimizer_state_dict is not None:
@@ -159,9 +166,11 @@ class AlphaZoo:
 
         if running_mode == "sequential":
             self.games_per_step = num_games_per_type_per_step * self.num_game_types
-            print("\n\nRunning until training step number " + str(training_steps) + " with " + str(self.games_per_step) + " games in each step:")
+            print("\n\nRunning until training step number " + str(training_steps) +
+                  " with " + str(self.games_per_step) + " games in each step:")
         elif running_mode == "asynchronous":
-            print("\n\nRunning until training step number " + str(training_steps) + " with " + str(update_delay) + "s of delay between each step:")
+            print("\n\nRunning until training step number " + str(training_steps) +
+                  " with " + str(update_delay) + "s of delay between each step:")
         if early_fill_games_per_type > 0:
             total_early_fill = early_fill_games_per_type * self.num_game_types
             print("-Playing " + str(total_early_fill) + " initial games to fill the replay buffer.")
@@ -174,7 +183,14 @@ class AlphaZoo:
 
         if early_fill_games_per_type > 0:
             print("\n\n\n\nEarly Buffer Fill\n")
-            self.run_selfplay(early_fill_games_per_type, cache_choice, keep_updated, cache_max=cache_max, text="Playing initial games", early_fill=True)
+            self.run_selfplay(
+                early_fill_games_per_type, 
+                cache_choice, 
+                keep_updated, 
+                cache_max=cache_max, 
+                text="Playing initial games", 
+                early_fill=True
+            )
 
         actor_list: list[Any] = []
         termination_futures: list[Any] = []
@@ -199,29 +215,33 @@ class AlphaZoo:
         self.train_global_policy_loss: list[tuple[int, float]] = []
         self.train_global_combined_loss: list[tuple[int, float]] = []
 
-        def clear_metrics(m: dict[str, Any]) -> None:
-            m["step"] = 0
-            m["episode_len_mean"] = 0.0
-            m["value_loss"] = None
-            m["policy_loss"] = None
-            m["combined_loss"] = None
-            m["replay_buffer_size"] = 0
-            m["learning_rate"] = 0.0
-            m["step_time"] = 0.0
-            m["loss_history"] = {"value": [], "policy": [], "combined": []}
-
+        
         metrics: dict[str, Any] = {}
-        clear_metrics(metrics)
+        self.clear_metrics(metrics)
 
         steps_to_run = range(self.starting_step + 1, training_steps + 1)
         for step in steps_to_run:
             self.current_step = step
             step_start = time.time()
             if running_mode == "sequential":
-                self.run_selfplay(num_games_per_type_per_step, cache_choice, keep_updated, cache_max=cache_max, text="Self-Play Games", metrics=metrics)
+                self.run_selfplay(
+                    num_games_per_type_per_step, 
+                    cache_choice, 
+                    keep_updated, 
+                    cache_max=cache_max, 
+                    text="Self-Play Games", 
+                    metrics=metrics
+                )
 
             print("\n\nLearning rate: " + str(self.scheduler.get_last_lr()[0]))
-            self.train_network(learning_method, policy_loss_function, value_loss_function, normalize_policy, prog_alpha, batch_size)
+            self.train_network(
+                learning_method, 
+                policy_loss_function, 
+                value_loss_function, 
+                normalize_policy, 
+                prog_alpha, 
+                batch_size
+            )
 
             if storage_frequency and (step % storage_frequency == 0):
                 self.latest_network.model_to_cpu()
@@ -235,28 +255,33 @@ class AlphaZoo:
 
 
             # end of step metrics
+            value_loss = self.train_global_value_loss
+            policy_loss = self.train_global_policy_loss
+            combined_loss = self.train_global_combined_loss
             metrics["step"] = step
-            metrics["value_loss"] = self.train_global_value_loss[-1][1] if self.train_global_value_loss else None
-            metrics["policy_loss"] = self.train_global_policy_loss[-1][1] if self.train_global_policy_loss else None
-            metrics["combined_loss"] = self.train_global_combined_loss[-1][1] if self.train_global_combined_loss else None
+            metrics["value_loss"] = value_loss[-1][1] if value_loss else None
+            metrics["policy_loss"] = policy_loss[-1][1] if policy_loss else None
+            metrics["combined_loss"] = combined_loss[-1][1] if combined_loss else None
             metrics["replay_buffer_size"] = ray.get(self.replay_buffer.len.remote(), timeout=120)
             metrics["learning_rate"] = self.scheduler.get_last_lr()[0]
             metrics["step_time"] = step_end - step_start
             metrics["loss_history"] = {
-                "value": list(self.train_global_value_loss),
-                "policy": list(self.train_global_policy_loss),
-                "combined": list(self.train_global_combined_loss),
+                "value": list(value_loss),
+                "policy": list(policy_loss),
+                "combined": list(combined_loss),
             }
 
             if on_step_end is not None:
                 on_step_end(self, step, metrics)
 
-            clear_metrics(metrics)
+            self.clear_metrics(metrics)
 
             print("-------------------------------------\n")
             print("\nMain process memory usage: ")
-            print("Current memory usage: " + format(process.memory_info().rss / (1024 * 1000), '.6') + " MB")
-            print("Peak memory usage:    " + format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1000, '.6') + " MB\n")
+            print("Current memory usage: " +
+                   format(process.memory_info().rss / (1024 * 1000), '.6') + " MB")
+            print("Peak memory usage:    " +
+                   format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1000, '.6') + " MB\n")
             print("\n-------------------------------------\n\n")
 
         if running_mode == "asynchronous":
@@ -334,7 +359,8 @@ class AlphaZoo:
                         latest_cache = cache
                         first = False
                     else:
-                        if latest_cache is not None and latest_cache.get_fill_ratio() < latest_cache.get_update_threshold():
+                        if ((latest_cache is not None) and
+                            (latest_cache.get_fill_ratio() < latest_cache.get_update_threshold())):
                             latest_cache.update(cache)
 
                 if games_requested < num_games_per_type:
@@ -349,8 +375,13 @@ class AlphaZoo:
         total_time = end - start
         if metrics is not None:
             metrics["episode_len_mean"] = total_moves / total_games
-        print("Games: " + str(total_games) + " | Time(m): " + format(total_time / 60, '.4') + " | Avg per game(s): " + format(total_time / total_games, '.4'))
-        print("Cache avg hit ratio: " + format(avg_hit_ratio / max(num_games_per_type, 1), '.4') + " | avg len: " + format(avg_cache_len / max(num_games_per_type, 1), '.6'))
+            
+        print("Games: " + str(total_games) +
+              " | Time(m): " + format(total_time / 60, '.4') +
+              " | Avg per game(s): " + format(total_time / total_games, '.4'))
+        
+        print("Cache avg hit ratio: " + format(avg_hit_ratio / max(num_games_per_type, 1), '.4') +
+              " | avg len: " + format(avg_cache_len / max(num_games_per_type, 1), '.6'))
 
     ##########################################################################
     # ---------------------------    TRAINING    --------------------------- #
@@ -675,3 +706,15 @@ class AlphaZoo:
         for i in range(divisions):
             time.sleep(small_rest)
         print("Delay of " + format(delay_period, '.1f') + "s completed.")
+
+    def clear_metrics(self, m: dict[str, Any]) -> None:
+        m["step"] = 0
+        m["episode_len_mean"] = 0.0
+        m["value_loss"] = None
+        m["policy_loss"] = None
+        m["combined_loss"] = None
+        m["replay_buffer_size"] = 0
+        m["learning_rate"] = 0.0
+        m["step_time"] = 0.0
+        m["loss_history"] = {"value": [], "policy": [], "combined": []}
+
