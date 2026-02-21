@@ -10,9 +10,8 @@ from alphazoo.wrappers.pettingzoo_wrapper import PettingZooWrapper
 from alphazoo.training.alphazoo import AlphaZoo
 from alphazoo.configs.alphazoo_config import (
     AlphaZooConfig, RunningConfig, SequentialConfig, CacheConfig,
-    SavingConfig, RecurrentConfig, LearningConfig, EpochsConfig,
+    RecurrentConfig, LearningConfig, EpochsConfig,
     SamplesConfig, SchedulerConfig, OptimizerConfig, SGDConfig,
-    InitializationConfig,
 )
 from alphazoo.configs import SearchConfig
 
@@ -57,13 +56,12 @@ def action_mask_fn(env: object) -> np.ndarray:
 
 # --------------- Test --------------- #
 
-def test_connect_four_training(work_dir: str) -> None:
+def test_connect_four_training() -> None:
     config_dir = os.path.join(os.path.dirname(__file__), "configs")
     search_config_path = os.path.join(config_dir, "test_search_config.yaml")
     search_config = SearchConfig.from_yaml(search_config_path)
 
     config = AlphaZooConfig(
-        initialization=InitializationConfig(network_name="test_network"),
         running=RunningConfig(
             running_mode="sequential",
             num_actors=1,
@@ -75,7 +73,6 @@ def test_connect_four_training(work_dir: str) -> None:
             sequential=SequentialConfig(num_games_per_type_per_step=2),
         ),
         cache=CacheConfig(cache_choice="disabled", max_size=1000, keep_updated=False),
-        saving=SavingConfig(save_frequency=100, storage_frequency=1, save_buffer=False),
         recurrent=RecurrentConfig(
             train_iterations=[1],
             pred_iterations=[[1]],
@@ -116,5 +113,3 @@ def test_connect_four_training(work_dir: str) -> None:
     )
 
     trainer.train()
-
-    assert os.path.exists(os.path.join(work_dir, "Games"))

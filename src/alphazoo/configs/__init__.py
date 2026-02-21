@@ -9,12 +9,9 @@ from .alphazoo_config import (
     EpochsConfig,
     SamplesConfig,
     RecurrentConfig,
-    SavingConfig,
     SchedulerConfig,
     OptimizerConfig,
     SGDConfig,
-    InitializationConfig,
-    CheckpointConfig,
 )
 
 __all__ = [
@@ -31,10 +28,7 @@ __all__ = [
     "EpochsConfig",
     "SamplesConfig",
     "RecurrentConfig",
-    "SavingConfig",
     "SchedulerConfig",
     "OptimizerConfig",
     "SGDConfig",
-    "InitializationConfig",
-    "CheckpointConfig",
 ]

@@ -20,6 +20,19 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
+dependencies = [
+    "numpy~=1.24",
+    "torch~=2.0",
+    "pettingzoo~=1.24",
+    "gymnasium~=1.1",
+    "ray~=2.7",
+    "scipy~=1.11",
+    "ruamel.yaml~=0.17",
+    "psutil~=5.9",
+    "termcolor~=2.3",
+    "progress~=1.6",
+    "more_itertools~=9.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/guilherme439/alphazoo"
@@ -29,23 +42,6 @@ Repository = "https://github.com/guilherme439/alphazoo"
 
 [tool.flit.module]
 name = "alphazoo"
-
-dependencies = [
-    "numpy~=1.24",
-    "torch~=2.0",
-    "pettingzoo~=1.24",
-    "gymnasium~=0.29",
-    "ray~=2.7",
-    "scipy~=1.11",
-    "ruamel.yaml~=0.17",
-    "psutil~=5.9",
-    "termcolor~=2.3",
-    "progress~=1.6",
-    "more_itertools~=9.0",
-    "cityhash~=0.2",
-    "metrohash~=0.0.6",
-    "bitstring~=3.1",
-]
 
 [dependency-groups]
 test = [

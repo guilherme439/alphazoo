@@ -1,11 +1,8 @@
 from __future__ import annotations
 
 import math
-import time
 import os
-import pickle
-import glob
-import re
+import time
 import psutil
 import resource
 from typing import Any, Callable
@@ -15,7 +12,6 @@ from random import randrange
 import ray
 import torch
 from torch import nn, Tensor
-from torch.optim import Optimizer
 from torch.optim.lr_scheduler import MultiStepLR
 import numpy as np
 import more_itertools
@@ -27,58 +23,12 @@ from ..utils.remote_storage import RemoteStorage
 from ..utils.caches.cache import Cache
 
 from ..utils.functions.loss_functions import KLDivergence, MSError, SquaredError, AbsoluteError
-from ..utils.functions.general_utils import create_cache, create_optimizer
+from ..utils.functions.general_utils import create_optimizer
 
 from ..configs.alphazoo_config import AlphaZooConfig
-from ..configs.search_config import SearchConfig
 
 StepCallback = Callable[["AlphaZoo", int, dict[str, Any]], None]
 LossFunction = Callable[[Tensor, Tensor], Tensor]
-
-
-def _load_network_checkpoint(
-    game_name: str, network_name: str, checkpoint_number: int | str,
-) -> tuple[Network_Manager, Optimizer, dict, Optimizer, dict, str, int]:
-    game_folder = "Games/" + game_name + "/"
-    cp_network_folder = game_folder + "models/" + network_name + "/"
-    if not os.path.exists(cp_network_folder):
-        raise Exception("Could not find a network with that name.")
-
-    buffer_path = cp_network_folder + "replay_buffer.cp"
-
-    if checkpoint_number == "auto":
-        cp_paths = glob.glob(cp_network_folder + "*_cp")
-        checkpoint_number = sorted(list(map(lambda s: int(re.findall(r'\d+', s)[-1]), cp_paths)))[-1]
-
-    checkpoint_path = cp_network_folder + network_name + "_" + str(checkpoint_number) + "_cp"
-    checkpoint = torch.load(checkpoint_path, map_location=torch.device('cpu'))
-
-    model_pickle_path = cp_network_folder + "base_model.pkl"
-    with open(model_pickle_path, 'rb') as f:
-        model = pickle.load(f)
-    model.load_state_dict(checkpoint["model_state_dict"])
-
-    optimizer_pickle_path = cp_network_folder + "base_optimizer.pkl"
-    with open(optimizer_pickle_path, 'rb') as f:
-        base_optimizer = pickle.load(f)
-    optimizer_dict = checkpoint["optimizer_state_dict"]
-
-    scheduler_pickle_path = cp_network_folder + "base_scheduler.pkl"
-    with open(scheduler_pickle_path, 'rb') as f:
-        base_scheduler = pickle.load(f)
-    scheduler_dict = checkpoint["scheduler_state_dict"]
-
-    nn_mgr = Network_Manager(model)
-    return nn_mgr, base_optimizer, optimizer_dict, base_scheduler, scheduler_dict, buffer_path, int(checkpoint_number)
-
-
-def _save_checkpoint(save_path: str, network: Network_Manager, optimizer: Optimizer, scheduler: MultiStepLR) -> None:
-    checkpoint = {
-        'model_state_dict': network.get_model().state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-        'scheduler_state_dict': scheduler.state_dict(),
-    }
-    torch.save(checkpoint, save_path)
 
 
 class AlphaZoo:
@@ -88,18 +38,20 @@ class AlphaZoo:
         game_class: type,
         game_args_list: list[tuple[Any, ...]],
         config: AlphaZooConfig,
-        model: nn.Module | None = None,
+        model: nn.Module,
+        optimizer_state_dict: dict | None = None,
+        scheduler_state_dict: dict | None = None,
+        replay_buffer_state: dict | None = None,
     ) -> None:
 
         self.game_args_list = game_args_list
         self.game_class = game_class
         self.example_game = self.game_class(*self.game_args_list[0])
-        self.game_name: str = self.example_game.get_dirname()
 
         self.config = config
 
         self.starting_step: int = 0
-        self.load_buffer: bool = False
+        self._replay_buffer_state = replay_buffer_state
 
         # -------------------- NETWORK SETUP ------------------- #
 
@@ -112,60 +64,14 @@ class AlphaZoo:
         momentum = config.optimizer.sgd.momentum
         nesterov = config.optimizer.sgd.nesterov
 
-        load_checkpoint = config.initialization.load_checkpoint
-        if load_checkpoint:
-            cp = config.initialization.checkpoint
-            cp_network_name = cp.cp_network_name
-            iteration_number = cp.iteration_number
-            keep_optimizer = cp.keep_optimizer
-            keep_scheduler = cp.keep_scheduler
-            self.load_buffer = cp.load_buffer
-            self.fresh_start = cp.fresh_start
+        self.latest_network = Network_Manager(model)
+        self.optimizer = create_optimizer(self.latest_network.get_model(), optimizer_name, starting_lr, weight_decay, momentum, nesterov)
+        self.scheduler = MultiStepLR(self.optimizer, milestones=scheduler_boundaries, gamma=scheduler_gamma)
 
-            network_cp_data = _load_network_checkpoint(self.game_name, cp_network_name, iteration_number)
-            nn_mgr, base_optimizer, optimizer_dict, base_scheduler, scheduler_dict, buffer_load_path, iteration_number = network_cp_data
-            self.buffer_load_path = buffer_load_path
-            if not self.fresh_start:
-                self.starting_step = iteration_number
-
-            self.latest_network = nn_mgr
-            if keep_optimizer:
-                self.optimizer: Optimizer = base_optimizer.__class__(self.latest_network.get_model().parameters())
-                self.optimizer.load_state_dict(optimizer_dict)
-                if keep_scheduler:
-                    self.scheduler: MultiStepLR = base_scheduler.__class__(self.optimizer, milestones=[1])
-                    self.scheduler.load_state_dict(scheduler_dict)
-                else:
-                    for g in self.optimizer.param_groups:
-                        g['lr'] = starting_lr
-                    self.scheduler = MultiStepLR(self.optimizer, milestones=scheduler_boundaries, gamma=scheduler_gamma)
-            else:
-                self.optimizer = create_optimizer(self.latest_network.get_model(), optimizer_name, starting_lr, weight_decay, momentum, nesterov)
-                if keep_scheduler:
-                    self.scheduler = base_scheduler.__class__(self.optimizer, milestones=[1])
-                    self.scheduler.load_state_dict(scheduler_dict)
-                else:
-                    self.scheduler = MultiStepLR(self.optimizer, milestones=scheduler_boundaries, gamma=scheduler_gamma)
-        else:
-            self.fresh_start = True
-            if model is None:
-                raise Exception("When not loading from a network checkpoint, a \"model\" argument must be provided.")
-            self.latest_network = Network_Manager(model)
-            self.optimizer = create_optimizer(self.latest_network.get_model(), optimizer_name, starting_lr, weight_decay, momentum, nesterov)
-            self.scheduler = MultiStepLR(self.optimizer, milestones=scheduler_boundaries, gamma=scheduler_gamma)
-
-        # -------------------- FOLDERS SETUP ------------------- #
-
-        self.network_name: str = config.initialization.network_name
-
-        self.game_folder_name = "Games/" + self.game_name
-        self.network_folder_path = self.game_folder_name + "/models/" + self.network_name + "/"
-        if not os.path.exists(self.network_folder_path):
-            os.makedirs(self.network_folder_path)
-        elif self.fresh_start:
-            print("\nWARNING: Starting fresh on an already existing network folder!")
-            print("All previous files will be replaced!")
-            time.sleep(30)
+        if optimizer_state_dict is not None:
+            self.optimizer.load_state_dict(optimizer_state_dict)
+        if scheduler_state_dict is not None:
+            self.scheduler.load_state_dict(scheduler_state_dict)
 
     def train(self, on_step_end: StepCallback | None = None) -> None:
         pid = os.getpid()
@@ -193,9 +99,7 @@ class AlphaZoo:
         cache_max = config.cache.max_size
         keep_updated = config.cache.keep_updated
 
-        save_frequency = config.saving.save_frequency
-        storage_frequency = config.saving.storage_frequency
-        save_replay_buffer = config.saving.save_buffer
+        storage_frequency = 1
 
         pred_iterations = config.recurrent.pred_iterations
         prog_alpha = config.recurrent.alpha
@@ -222,11 +126,9 @@ class AlphaZoo:
             batch_size = config.learning.samples.batch_size
 
         self.replay_buffer = ReplayBuffer.remote(replay_window_size, batch_size)
-        if self.load_buffer:
-            print("\nLoading replay buffer...")
-            ray.get(self.replay_buffer.load_from_file.remote(self.buffer_load_path, self.starting_step))
-            time.sleep(0.1)
-            print("Loading done.")
+        if self._replay_buffer_state is not None:
+            ray.get(self.replay_buffer.load_state.remote(self._replay_buffer_state))
+            self._replay_buffer_state = None
 
         # ------------------- LOSS FUNCTIONS ------------------- #
 
@@ -270,10 +172,6 @@ class AlphaZoo:
 
         print("\n\n--------------------------------\n")
 
-        if self.fresh_start:
-            save_path = self.network_folder_path + self.network_name + "_" + str(self.starting_step) + "_cp"
-            _save_checkpoint(save_path, self.latest_network, self.optimizer, self.scheduler)
-
         if early_fill_games_per_type > 0:
             print("\n\n\n\nEarly Buffer Fill\n")
             self.run_selfplay(early_fill_games_per_type, cache_choice, keep_updated, cache_max=cache_max, text="Playing initial games", early_fill=True)
@@ -312,13 +210,6 @@ class AlphaZoo:
 
             print("\n\nLearning rate: " + str(self.scheduler.get_last_lr()[0]))
             self.train_network(learning_method, policy_loss_function, value_loss_function, normalize_policy, prog_alpha, batch_size)
-
-            if save_frequency and (step % save_frequency == 0):
-                checkpoint_path = self.network_folder_path + self.network_name + "_" + str(step) + "_cp"
-                buffer_path = self.network_folder_path + "replay_buffer.cp"
-                _save_checkpoint(checkpoint_path, self.latest_network, self.optimizer, self.scheduler)
-                if save_replay_buffer:
-                    ray.get(self.replay_buffer.save_to_file.remote(buffer_path, step))
 
             if storage_frequency and (step % storage_frequency == 0):
                 self.latest_network.model_to_cpu()
@@ -751,6 +642,15 @@ class AlphaZoo:
     ##########################################################################
     # ---------------------------    UTILITY    ---------------------------- #
     ##########################################################################
+
+    def get_optimizer_state_dict(self) -> dict:
+        return self.optimizer.state_dict()
+
+    def get_scheduler_state_dict(self) -> dict:
+        return self.scheduler.state_dict()
+
+    def get_replay_buffer_state(self) -> dict:
+        return ray.get(self.replay_buffer.get_state.remote())
 
     def wait_for_delay(self, delay_period: int) -> None:
         divisions = 10

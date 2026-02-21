@@ -7,23 +7,6 @@ from .search_config import SearchConfig
 
 
 @dataclass
-class CheckpointConfig:
-    cp_network_name: str = "checkpoint_net"
-    iteration_number: int = 0
-    keep_optimizer: bool = True
-    keep_scheduler: bool = False
-    load_buffer: bool = True
-    fresh_start: bool = False
-
-
-@dataclass
-class InitializationConfig:
-    network_name: str = "network"
-    load_checkpoint: bool = False
-    checkpoint: CheckpointConfig = field(default_factory=CheckpointConfig)
-
-
-@dataclass
 class SequentialConfig:
     num_games_per_type_per_step: int = 12
 
@@ -51,13 +34,6 @@ class CacheConfig:
     cache_choice: Literal["keyless", "dict", "disabled"] = "keyless"
     max_size: int = 8000
     keep_updated: bool = True
-
-
-@dataclass
-class SavingConfig:
-    save_frequency: int = 20
-    storage_frequency: int = 1
-    save_buffer: bool = True
 
 
 @dataclass
@@ -121,8 +97,6 @@ class AlphaZooConfig:
     cache: CacheConfig = field(default_factory=CacheConfig)
     learning: LearningConfig = field(default_factory=LearningConfig)
     recurrent: RecurrentConfig = field(default_factory=RecurrentConfig)
-    saving: SavingConfig = field(default_factory=SavingConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
-    initialization: InitializationConfig = field(default_factory=InitializationConfig)
     search: SearchConfig = field(default_factory=SearchConfig)

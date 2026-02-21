@@ -11,48 +11,6 @@ import numpy as np
 import torch
 
 
-def clone_pettingzoo_env(original_env, env_creator):
-    """
-    Clone a PettingZoo environment, preserving its full runtime state.
-
-    Tree-search algorithms like MCTS need to clone environments to explore
-    hypothetical moves. However, PettingZoo (and Gymnasium) never standardized
-    a way to copy or snapshot environment state. Worse, PettingZoo's EzPickle
-    base class overrides serialization so that deepcopy/pickle only preserve
-    constructor arguments, silently discarding all runtime state (board, turns,
-    rewards, etc.).
-
-    This function works around EzPickle by:
-      1. Creating a structurally identical env via env_creator() + reset()
-      2. Walking both wrapper chains in lockstep (OrderEnforcing -> Assert ->
-         TerminateIllegal -> raw_env)
-      3. Deep-copying each layer's instance variables onto the fresh env
-
-    Args:
-        original_env: The PettingZoo env to clone (may be wrapped in multiple layers).
-        env_creator: Callable that returns a fresh env with the same wrapper chain.
-
-    Returns:
-        A new env instance with identical runtime state, fully independent from the original.
-    """
-    fresh_env = env_creator()
-    fresh_env.reset()
-
-    original_layer = original_env
-    fresh_layer = fresh_env
-    while True:
-        for attr_name, attr_value in vars(original_layer).items():
-            if attr_name == 'env':  # Skip the wrapper-chain pointer itself
-                continue
-            setattr(fresh_layer, attr_name, deepcopy(attr_value))
-
-        if not hasattr(original_layer, 'env'):
-            break
-        original_layer = original_layer.env
-        fresh_layer = fresh_layer.env
-
-    return fresh_env
-
 
 class PettingZooWrapper:
     """
@@ -108,7 +66,7 @@ class PettingZooWrapper:
         clone.action_mask_fn = self.action_mask_fn
         clone._num_actions = self._num_actions
 
-        clone.env = clone_pettingzoo_env(self.env, self.env_creator)
+        clone.env = self._clone_pettingzoo_env(self.env, self.env_creator)
 
         clone._current_player = self._current_player
         clone.length = self.length
@@ -245,3 +203,45 @@ class PettingZooWrapper:
             return int(np.prod(action_space.shape))
         else:
             raise ValueError(f"Unsupported action space type: {type(action_space)}")
+    
+    def _clone_pettingzoo_env(self, original_env, env_creator):
+        """
+        Clone a PettingZoo environment, preserving its full runtime state.
+
+        Tree-search algorithms like MCTS need to clone environments to explore
+        hypothetical moves. However, PettingZoo (and Gymnasium) never standardized
+        a way to copy or snapshot environment state. Worse, PettingZoo's EzPickle
+        base class overrides serialization so that deepcopy/pickle only preserve
+        constructor arguments, silently discarding all runtime state (board, turns,
+        rewards, etc.).
+
+        This function works around EzPickle by:
+        1. Creating a structurally identical env via env_creator() + reset()
+        2. Walking both wrapper chains in lockstep (OrderEnforcing -> Assert ->
+            TerminateIllegal -> raw_env)
+        3. Deep-copying each layer's instance variables onto the fresh env
+
+        Args:
+            original_env: The PettingZoo env to clone (may be wrapped in multiple layers).
+            env_creator: Callable that returns a fresh env with the same wrapper chain.
+
+        Returns:
+            A new env instance with identical runtime state, fully independent from the original.
+        """
+        fresh_env = env_creator()
+        fresh_env.reset()
+
+        original_layer = original_env
+        fresh_layer = fresh_env
+        while True:
+            for attr_name, attr_value in vars(original_layer).items():
+                if attr_name == 'env':  # Skip the wrapper-chain pointer itself
+                    continue
+                setattr(fresh_layer, attr_name, deepcopy(attr_value))
+
+            if not hasattr(original_layer, 'env'):
+                break
+            original_layer = original_layer.env
+            fresh_layer = fresh_layer.env
+
+        return fresh_env

@@ -18,10 +18,6 @@ class ReplayBuffer:
         self.n_games: int = 0
         self.full: bool = False
 
-        # Use to load parts of the replay buffer based on the step number
-        self.step_to_size_map: dict[int, tuple[int, int]] = {}
-        self.allow_partial_loading: bool = True
-
     def save_game(self, game: Any, game_index: int) -> None:
         if self.n_games >= self.window_size:
             self.full = True
@@ -60,42 +56,14 @@ class ReplayBuffer:
     def played_games(self) -> int:
         return self.n_games
 
-    def save_to_file(self, file_path: str, step: int) -> None:
-        ''' saves a checkpoint to a file '''
-        self.step_to_size_map[step] = (self.len(), self.played_games())
-        if self.full:
-            # When the buffer fills it starts throwing away old entries,
-            # so it no longer makes sence to load older buffer parts
-            self.allow_partial_loading = False
-
-        checkpoint = {
+    def get_state(self) -> dict:
+        return {
             'buffer': self.buffer,
-            'map': self.step_to_size_map,
-            'partial_loading': self.allow_partial_loading,
+            'n_games': self.n_games,
+            'full': self.full,
         }
-        torch.save(checkpoint, file_path)
 
-    def load_from_file(self, file_path: str, step: int) -> None:
-        ''' loads replay buffer state based on file checkpoint '''
-        checkpoint = torch.load(file_path)
-        buffer = checkpoint['buffer']
-        step_map = checkpoint['map']
-        self.allow_partial_loading = checkpoint['partial_loading']
-
-        if self.allow_partial_loading:
-            try:
-                buffer_len, num_games = step_map[step]
-            except KeyError:
-                raise Exception("Could not load the replay buffer checkpoint for that iteration number.")
-
-            self.buffer = buffer[:buffer_len + 1]
-            self.n_games = num_games
-        else:
-            latest_step, size_info = list(step_map.items())[-1]
-            if step != latest_step:
-                print("Partial loading is no longer possible.")
-                print("Loading the latest buffer instead.")
-
-            buffer_len, num_games = size_info
-            self.buffer = buffer
-            self.n_games = num_games
+    def load_state(self, state: dict) -> None:
+        self.buffer = state['buffer']
+        self.n_games = state['n_games']
+        self.full = state['full']
