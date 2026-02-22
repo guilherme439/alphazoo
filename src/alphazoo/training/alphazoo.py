@@ -35,18 +35,21 @@ class AlphaZoo:
 
     def __init__(
         self,
-        game_class: type,
-        game_args_list: list[tuple[Any, ...]],
+        env: Any,
         config: AlphaZooConfig,
         model: nn.Module,
         optimizer_state_dict: dict | None = None,
         scheduler_state_dict: dict | None = None,
         replay_buffer_state: dict | None = None,
     ) -> None:
+        from ..wrappers.pettingzoo_wrapper import PettingZooWrapper
 
-        self.game_args_list = game_args_list
-        self.game_class = game_class
-        self.example_game = self.game_class(*self.game_args_list[0])
+        envs = env if isinstance(env, list) else [env]
+        self.games = [
+            e if isinstance(e, PettingZooWrapper) else PettingZooWrapper(e)
+            for e in envs
+        ]
+        self.example_game = self.games[0]
 
         self.config = config
 
@@ -91,7 +94,7 @@ class AlphaZoo:
         num_actors = config.running.num_actors
         early_fill_games_per_type = config.running.early_fill_per_type
         training_steps = int(config.running.training_steps)
-        self.num_game_types = len(self.game_args_list)
+        self.num_game_types = len(self.games)
 
         update_delay: int = 0
         num_games_per_type_per_step: int = 0
@@ -112,8 +115,7 @@ class AlphaZoo:
         prog_alpha = config.recurrent.alpha
 
         # dummy forward pass to initialize the weights
-        game = self.game_class(*self.game_args_list[0])
-        self.latest_network.inference(game.generate_network_input(), False, 1)
+        self.latest_network.inference(self.games[0].generate_network_input(), False, 1)
 
         # ------------- STORAGE AND BUFFERS SETUP -------------- #
 
@@ -198,8 +200,7 @@ class AlphaZoo:
             actor_list = [Gamer.options(max_concurrency=2).remote(
                 self.replay_buffer,
                 self.network_storage,
-                self.game_class,
-                self.game_args_list[0],
+                self.games[0],
                 0,
                 self.config.search,
                 pred_iterations[0],
@@ -316,15 +317,13 @@ class AlphaZoo:
         total_games = self.num_game_types * num_games_per_type
         total_moves: int = 0
         print(text)
-        for i in range(len(self.game_args_list)):
-            game_args = self.game_args_list[i]
+        for i, game in enumerate(self.games):
             iterations = pred_iterations_list[i]
             game_index = i
             actor_list = [Gamer.remote(
                 self.replay_buffer,
                 self.network_storage,
-                self.game_class,
-                game_args,
+                game,
                 game_index,
                 search_config,
                 iterations,

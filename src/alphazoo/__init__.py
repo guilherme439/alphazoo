@@ -14,6 +14,8 @@ from .search.node import Node
 from .network_manager import Network_Manager
 
 from .configs.alphazoo_config import AlphaZooConfig
+from .wrappers.ipettingzoo_wrapper import IPettingZooWrapper
+from .wrappers.pettingzoo_wrapper import PettingZooWrapper
 
 __all__ = [
     "__version__",
@@ -24,4 +26,6 @@ __all__ = [
     "Node",
     "Network_Manager",
     "AlphaZooConfig",
+    "IPettingZooWrapper",
+    "PettingZooWrapper",
 ]

@@ -23,8 +23,7 @@ class Gamer:
         self,
         buffer: Any,
         shared_storage: Any,
-        game_class: type,
-        game_args: tuple[Any, ...],
+        game: Any,
         game_index: int,
         search_config: SearchConfig,
         recurrent_iterations: int,
@@ -33,8 +32,7 @@ class Gamer:
     ) -> None:
         self.buffer = buffer
         self.shared_storage = shared_storage
-        self.game_class = game_class
-        self.game_args = game_args
+        self.game = game
         self.game_index = game_index
 
         self.search_config = search_config
@@ -58,7 +56,8 @@ class Gamer:
             "final_bias_value": 0,
         }
 
-        game = self.game_class(*self.game_args)
+        self.game.reset()
+        game = self.game
         keep_subtree: bool = self.search_config.simulation.keep_subtree
 
         if cache is None:

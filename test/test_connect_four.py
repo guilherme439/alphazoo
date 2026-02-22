@@ -2,11 +2,9 @@ import os
 
 import torch
 import torch.nn as nn
-import numpy as np
 
 from pettingzoo.classic import connect_four_v3
 
-from alphazoo.wrappers.pettingzoo_wrapper import PettingZooWrapper
 from alphazoo.training.alphazoo import AlphaZoo
 from alphazoo.configs.alphazoo_config import (
     AlphaZooConfig, RunningConfig, SequentialConfig, CacheConfig,
@@ -40,18 +38,6 @@ class ConnectFourNet(nn.Module):
         policy = self.policy_head(x)
         value = torch.tanh(self.value_head(x))
         return policy, value
-
-
-# --------------- Callbacks --------------- #
-
-def observation_to_state(obs: dict, agent_id: str) -> torch.Tensor:
-    board = torch.tensor(obs["observation"], dtype=torch.float32)
-    return board.unsqueeze(0)
-
-
-def action_mask_fn(env: object) -> np.ndarray:
-    obs = env.observe(env.agent_selection)
-    return np.array(obs["action_mask"], dtype=np.float32)
 
 
 # --------------- Test --------------- #
@@ -98,16 +84,10 @@ def test_connect_four_training() -> None:
         search=search_config,
     )
 
-    def env_creator():
-        return connect_four_v3.env()
-
-    game_args_list = [(env_creator, observation_to_state, action_mask_fn)]
-
     model = ConnectFourNet()
 
     trainer = AlphaZoo(
-        game_class=PettingZooWrapper,
-        game_args_list=game_args_list,
+        env=connect_four_v3.env(),
         config=config,
         model=model,
     )
