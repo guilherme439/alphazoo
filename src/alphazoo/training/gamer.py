@@ -12,6 +12,7 @@ from ..search.explorer import Explorer
 from ..network_manager import Network_Manager
 from ..utils.caches.cache import Cache
 from ..configs.search_config import SearchConfig
+from .game_record import GameRecord
 
 from ..utils.functions.general_utils import create_cache
 
@@ -58,20 +59,23 @@ class Gamer:
 
         self.game.reset()
         game = self.game
+        num_actions = game.get_num_actions()
         keep_subtree: bool = self.search_config.simulation.keep_subtree
 
         if cache is None:
             cache = create_cache(self.cache_choice, self.size_estimate)
 
         root_node = Node(0)
+        record = GameRecord(num_actions)
 
         network_copy: Network_Manager = ray.get(future_network, timeout=200)
         network_copy.check_devices() # Switch to gpu if available
 
+        move_count = 0
         while not game.is_terminal():
-            state = game.generate_network_input()
-            game.store_state(state)
-            #game.store_player(game.get_current_player())
+            obs = game.observe()
+            state = game.obs_to_state(obs, None)
+            record.add_step(state, game.get_current_player())
 
             action_i, chosen_child, root_bias = self.explorer.run_mcts(
                 game, network_copy, root_node, self.recurrent_iterations, cache,
@@ -80,28 +84,28 @@ class Gamer:
             tree_size = root_node.get_visit_count()
             node_children = root_node.num_children()
 
-            action_coords = game.get_action_coords(action_i)
-            game.step(action_coords)
+            game.step(action_i)
+            record.add_policy(root_node)
 
-            game.store_search_statistics(root_node)
             if keep_subtree:
                 root_node = chosen_child
             else:
                 root_node = Node(0)
 
+            move_count += 1
             stats["average_children"] += node_children
             stats["average_tree_size"] += tree_size
             stats["final_tree_size"] = tree_size
             stats["average_bias_value"] += root_bias
             stats["final_bias_value"] = root_bias
 
-        stats["number_of_moves"] = game.length
-        stats["average_children"] /= game.length
-        stats["average_tree_size"] /= game.length
-        stats["average_bias_value"] /= game.length
+        stats["number_of_moves"] = move_count
+        stats["average_children"] /= move_count
+        stats["average_tree_size"] /= move_count
+        stats["average_bias_value"] /= move_count
 
-        #print("hit ratio: " + str(cache.get_hit_ratio()))
-        ray.get(self.buffer.save_game.remote(game, self.game_index)) # each actor waits for the game to be saved before returning
+        terminal_value = game.get_terminal_value()
+        ray.get(self.buffer.save_game_record.remote(record, terminal_value, self.game_index))
 
         return stats, cache
 

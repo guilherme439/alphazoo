@@ -115,7 +115,9 @@ class AlphaZoo:
         prog_alpha = config.recurrent.alpha
 
         # dummy forward pass to initialize the weights
-        self.latest_network.inference(self.games[0].generate_network_input(), False, 1)
+        obs = self.games[0].observe()
+        dummy_state = self.games[0].obs_to_state(obs, None)
+        self.latest_network.inference(dummy_state, False, 1)
 
         # ------------- STORAGE AND BUFFERS SETUP -------------- #
 

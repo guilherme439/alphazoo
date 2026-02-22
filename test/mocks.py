@@ -26,12 +26,9 @@ class MockGame:
         clone._player = self._player
         return clone
 
-    def step(self, action_coords):
+    def step(self, action: int):
         self._depth += 1
         self._player = 2 if self._player == 1 else 1
-
-    def get_action_coords(self, action_i):
-        return (action_i,)
 
     def get_current_player(self):
         return self._player
@@ -42,16 +39,18 @@ class MockGame:
     def get_terminal_value(self):
         return 1.0
 
-    def generate_network_input(self):
-        state = torch.zeros(1, 4)
-        state[0, 0] = self._depth
-        state[0, 1] = self._player
-        return state
+    def observe(self):
+        state = np.zeros(4, dtype=np.float32)
+        state[0] = self._depth
+        state[1] = self._player
+        mask = self._action_mask if self._action_mask is not None else np.ones(self.num_actions, dtype=np.float32)
+        return {"observation": state, "action_mask": mask}
 
-    def possible_actions(self):
-        if self._action_mask is not None:
-            return np.array(self._action_mask, dtype=np.float32)
-        return np.ones(self.num_actions, dtype=np.float32)
+    def obs_to_state(self, obs, agent_id):
+        return torch.tensor(obs["observation"], dtype=torch.float32).unsqueeze(0)
+
+    def action_mask(self, obs):
+        return np.array(obs['action_mask'], dtype=np.float32)
 
     def get_num_actions(self):
         return self.num_actions

@@ -63,8 +63,7 @@ class Explorer:
 
             while node.expanded():
                 action_i, node = self.select_child(node)
-                action_coords = scratch_game.get_action_coords(action_i)
-                scratch_game.step(action_coords)
+                scratch_game.step(action_i)
                 search_path.append(node)
 
             value = self.evaluate(node, scratch_game, cache)
@@ -91,7 +90,8 @@ class Explorer:
                 if epsilon_softmax < softmax_threshold:
                     action_i = self.softmax_action(visit_counts)
                 elif epsilon_random < random_threshold:
-                    valid_actions_mask = game.possible_actions().flatten()
+                    obs = game.observe()
+                    valid_actions_mask = game.action_mask(obs).flatten()
                     n_valids = np.sum(valid_actions_mask)
                     probs = valid_actions_mask / n_valids
                     action_i = int(np.random.choice(game.get_num_actions(), p=probs))
@@ -148,7 +148,8 @@ class Explorer:
             node.terminal_value = game.get_terminal_value()
             return node.terminal_value
 
-        state = game.generate_network_input()
+        obs = game.observe()
+        state = game.obs_to_state(obs, None)
         if cache is not None:
             result = cache.get(state)
             if result is not None:
@@ -164,7 +165,7 @@ class Explorer:
         value: float = predicted_value.item()
 
         # Expand the node.
-        valid_actions_mask = game.possible_actions().flatten()
+        valid_actions_mask = game.action_mask(obs).flatten()
         action_probs = action_probs.flatten()
 
         probs = action_probs * valid_actions_mask # Use mask to get only valid moves

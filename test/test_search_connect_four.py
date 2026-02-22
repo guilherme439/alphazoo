@@ -7,6 +7,7 @@ import torch
 import numpy as np
 import pytest
 import os
+from copy import deepcopy
 
 from pettingzoo.classic import connect_four_v3
 
@@ -34,6 +35,18 @@ class ConnectFourNet(nn.Module):
         return self.policy_head(x), torch.tanh(self.value_head(x))
 
 
+class UniformConnectFourNet(nn.Module):
+    """Returns uniform policy and zero value — forces MCTS to rely on rollouts."""
+    def __init__(self):
+        super().__init__()
+        self.recurrent = False
+        self.dummy = nn.Linear(1, 1)
+
+    def forward(self, x):
+        batch = x.shape[0]
+        return torch.zeros(batch, 7), torch.zeros(batch, 1)
+
+
 @pytest.fixture
 def search_config():
     config_path = os.path.join(os.path.dirname(__file__), "configs", "test_search_config.yaml")
@@ -49,6 +62,12 @@ def make_game():
     return make_pettingzoo_game(lambda: connect_four_v3.env())
 
 
+def make_high_sim_config(base_config, n_sims=64):
+    cfg = deepcopy(base_config)
+    cfg.simulation.mcts_simulations = n_sims
+    return cfg
+
+
 class TestConnectFourMCTS:
 
     def test_selects_valid_action_from_start(self, search_config, network):
@@ -57,7 +76,8 @@ class TestConnectFourMCTS:
         root = Node(0)
 
         action, _, _ = explorer.run_mcts(game, network, root)
-        assert game.possible_actions()[action] == 1.0
+        obs = game.observe()
+        assert game.action_mask(obs)[action] == 1.0
 
     def test_root_expands_all_7_columns(self, search_config, network):
         explorer = Explorer(search_config, training=False)
@@ -73,10 +93,11 @@ class TestConnectFourMCTS:
         game = make_game()
 
         for _ in range(3):
-            game.step((0,))
-            game.step((0,))
+            game.step(0)
+            game.step(0)
 
-        mask = game.possible_actions()
+        obs = game.observe()
+        mask = game.action_mask(obs)
         assert mask[0] == 0.0, "Column 0 should be full"
 
         action, _, _ = explorer.run_mcts(game, network, Node(0))
@@ -85,8 +106,8 @@ class TestConnectFourMCTS:
     def test_does_not_mutate_game(self, search_config, network):
         explorer = Explorer(search_config, training=False)
         game = make_game()
-        game.step((3,))
-        game.step((2,))
+        game.step(3)
+        game.step(2)
 
         length_before = game.get_length()
         player_before = game.get_current_player()
@@ -104,10 +125,11 @@ class TestConnectFourMCTS:
             root = Node(0)
             action, _, _ = explorer.run_mcts(game, network, root)
 
-            mask = game.possible_actions()
+            obs = game.observe()
+            mask = game.action_mask(obs)
             assert mask[action] == 1.0, f"Illegal action {action} at move {moves}"
 
-            game.step((action,))
+            game.step(action)
             moves += 1
 
         assert moves <= 42
@@ -118,25 +140,83 @@ class TestConnectFourClone:
 
     def test_clone_preserves_state(self):
         game = make_game()
-        game.step((3,))
-        game.step((2,))
-        game.step((3,))
+        game.step(3)
+        game.step(2)
+        game.step(3)
 
         clone = game.shallow_clone()
 
         assert clone.get_current_player() == game.get_current_player()
         assert clone.get_length() == game.get_length()
         assert clone.is_terminal() == game.is_terminal()
-        np.testing.assert_array_equal(clone.possible_actions(), game.possible_actions())
-        torch.testing.assert_close(clone.generate_network_input(), game.generate_network_input())
+        obs_game = game.observe()
+        obs_clone = clone.observe()
+        np.testing.assert_array_equal(game.action_mask(obs_game), clone.action_mask(obs_clone))
+        torch.testing.assert_close(
+            game.obs_to_state(obs_game, None),
+            clone.obs_to_state(obs_clone, None),
+        )
 
     def test_clone_is_independent(self):
         game = make_game()
-        game.step((3,))
+        game.step(3)
 
         clone = game.shallow_clone()
-        clone.step((0,))
+        clone.step(0)
 
         assert game.get_length() == 1
         assert clone.get_length() == 2
         assert game.get_current_player() != clone.get_current_player()
+
+
+class TestConnectFourStrategic:
+    """Tests that MCTS finds obvious winning/blocking moves."""
+
+    def test_finds_winning_move_for_player_1(self, search_config):
+        """p1 has 3 in col 0, can win by playing col 0."""
+        cfg = make_high_sim_config(search_config, n_sims=64)
+        net = Network_Manager(UniformConnectFourNet())
+        explorer = Explorer(cfg, training=False)
+
+        game = make_game()
+        for _ in range(3):
+            game.step(0)  # p1
+            game.step(1)  # p2
+        assert game.get_current_player() == 1
+
+        action, _, _ = explorer.run_mcts(game, net, Node(0))
+        assert action == 0
+
+    def test_finds_winning_move_for_player_2(self, search_config):
+        """p2 has 3 in col 2, can win by playing col 2."""
+        cfg = make_high_sim_config(search_config, n_sims=64)
+        net = Network_Manager(UniformConnectFourNet())
+        explorer = Explorer(cfg, training=False)
+
+        game = make_game()
+        for _ in range(3):
+            game.step(6)  # p1 wastes on col 6
+            game.step(2)  # p2 stacks col 2
+        game.step(5)  # p1 wastes
+        # Now p2 to play, winning move is col 2
+        assert game.get_current_player() == 2
+
+        action, _, _ = explorer.run_mcts(game, net, Node(0))
+        assert action == 2
+
+    def test_winning_move_gets_most_visits(self, search_config):
+        """The winning child node should accumulate the most visits."""
+        cfg = make_high_sim_config(search_config, n_sims=64)
+        net = Network_Manager(UniformConnectFourNet())
+        explorer = Explorer(cfg, training=False)
+
+        game = make_game()
+        for _ in range(3):
+            game.step(0)
+            game.step(1)
+
+        root = Node(0)
+        explorer.run_mcts(game, net, root)
+
+        visits = {a: c.visit_count for a, c in root.children.items()}
+        assert visits[0] == max(visits.values())

@@ -67,6 +67,14 @@ assumes many things based on "standard" `PettingZoo` environment behavior.
 If your environment does not work exactly as `alphazoo` expects, you can override specific methods from the wrapper.
 The `IPettingZooWrapper` interface has all the methods that the wrapper uses.
 
+```python
+class MyWrapper(PettingZooWrapper):
+    def obs_to_state(self, obs, agent_id):
+        # channels-last → channels-first
+        t = torch.tensor(obs["observation"], dtype=torch.float32).unsqueeze(0)
+        return t.permute(0, 3, 1, 2)
+```
+
 ----
 
 ## References
