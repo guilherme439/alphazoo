@@ -208,6 +208,7 @@ class AlphaZoo:
                 pred_iterations[0],
                 cache_choice,
                 cache_max,
+                self.config.learning.player_dependent_value,
             ) for _ in range(num_actors)]
 
             termination_futures = [actor.play_forever.remote() for actor in actor_list]
@@ -331,6 +332,7 @@ class AlphaZoo:
                 iterations,
                 cache_choice,
                 cache_max,
+                self.config.learning.player_dependent_value,
             ) for _ in range(num_actors)]
 
             actor_pool = ray.util.ActorPool(actor_list)

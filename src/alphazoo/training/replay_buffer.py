@@ -18,7 +18,7 @@ class ReplayBuffer:
         self.n_games: int = 0
         self.full: bool = False
 
-    def save_game_record(self, record: Any, terminal_value: float, game_index: int) -> None:
+    def save_game_record(self, record: Any, game_index: int) -> None:
         if self.n_games >= self.window_size:
             self.full = True
         else:
@@ -27,7 +27,7 @@ class ReplayBuffer:
 
         for i in range(len(record)):
             state = record.states[i]
-            target = record.make_target(i, terminal_value)
+            target = record.make_target(i)
             entry = (state, target, game_index)
             if self.full:
                 self.buffer.pop(0)

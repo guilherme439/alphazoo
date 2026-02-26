@@ -12,7 +12,7 @@ from alphazoo.wrappers.pettingzoo_wrapper import PettingZooWrapper
 
 
 # ================================================================== #
-#  Helpers                                                             #
+#  Helpers                                                           #
 # ================================================================== #
 
 def make_connect_four():
@@ -24,7 +24,7 @@ def make_tictactoe():
 
 
 # ================================================================== #
-#  Terminal value                                                      #
+#  Terminal value                                                    #
 # ================================================================== #
 
 class TestTerminalValue:
@@ -38,7 +38,7 @@ class TestTerminalValue:
         game.step(0)
 
         assert game.is_terminal()
-        assert game.get_terminal_value() == 1.0
+        assert game.get_terminal_value() == -1.0  # current player (p2) lost
 
     def test_connect_four_player_2_wins(self):
         game = make_connect_four()
@@ -50,7 +50,7 @@ class TestTerminalValue:
         game.step(0)
 
         assert game.is_terminal()
-        assert game.get_terminal_value() == -1.0
+        assert game.get_terminal_value() == -1.0  # current player (p1) lost
 
     def test_tictactoe_player_1_wins(self):
         game = make_tictactoe()
@@ -62,7 +62,7 @@ class TestTerminalValue:
         game.step(2)
 
         assert game.is_terminal()
-        assert game.get_terminal_value() == 1.0
+        assert game.get_terminal_value() == -1.0  # current player (p2) lost
 
     def test_tictactoe_player_2_wins(self):
         game = make_tictactoe()
@@ -75,7 +75,7 @@ class TestTerminalValue:
         game.step(5)
 
         assert game.is_terminal()
-        assert game.get_terminal_value() == -1.0
+        assert game.get_terminal_value() == -1.0  # current player (p1) lost
 
     def test_tictactoe_draw(self):
         game = make_tictactoe()
@@ -88,7 +88,7 @@ class TestTerminalValue:
 
 
 # ================================================================== #
-#  Current player                                                      #
+#  Current player                                                    #
 # ================================================================== #
 
 class TestCurrentPlayer:
@@ -119,7 +119,7 @@ class TestCurrentPlayer:
 
 
 # ================================================================== #
-#  Observe / action mask / obs_to_state                                #
+#  Observe / action mask / obs_to_state                              #
 # ================================================================== #
 
 class TestObservation:
@@ -174,7 +174,7 @@ class TestObservation:
 
 
 # ================================================================== #
-#  Num actions / length                                                #
+#  Num actions / length                                              #
 # ================================================================== #
 
 class TestMetadata:
@@ -197,7 +197,7 @@ class TestMetadata:
 
 
 # ================================================================== #
-#  Reset                                                               #
+#  Reset                                                             #
 # ================================================================== #
 
 class TestReset:
@@ -234,7 +234,7 @@ class TestReset:
 
 
 # ================================================================== #
-#  Clone                                                               #
+#  Clone                                                             #
 # ================================================================== #
 
 class TestClone:

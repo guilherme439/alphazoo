@@ -9,8 +9,10 @@ import torch
 class GameRecord:
     """Stores training data collected during a single self-play game."""
 
-    def __init__(self, num_actions: int) -> None:
+    def __init__(self, num_actions: int, player_dependent_value: bool = True) -> None:
         self.num_actions = num_actions
+        self.player_dependent_value = player_dependent_value
+        self.terminal_value: float = 0.0
         self.states: list[torch.Tensor] = []
         self.players: list[int] = []
         self.policies: list[np.ndarray] = []
@@ -32,12 +34,15 @@ class GameRecord:
 
         self.policies.append(policy_target)
 
-    def make_target(self, i: int, terminal_value: float) -> tuple[float, np.ndarray]:
+    def set_terminal_value(self, value: float) -> None:
+        self.terminal_value = value
+
+    def make_target(self, i: int) -> tuple[float, np.ndarray]:
         player = self.players[i]
-        if player == 1:
-            value_target = terminal_value
+        if self.player_dependent_value and player != 1:
+            value_target = -self.terminal_value
         else:
-            value_target = -terminal_value
+            value_target = self.terminal_value
 
         policy_target = self.policies[i]
         return value_target, policy_target

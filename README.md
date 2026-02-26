@@ -61,14 +61,14 @@ trainer.train(on_step_end=on_step_end)
 
 ## Customization
 
-In order to work directly with `PettingZoo` environments, `alphazoo` creates a wrapper around them which
-assumes many things based on "standard" `PettingZoo` environment behavior.
+`IAlphazooGame` is the abstract game interface that AlphaZoo expects (it lists all the methods that must be implemented).  
 
-If your environment does not work exactly as `alphazoo` expects, you can override specific methods from the wrapper.
-The `IPettingZooWrapper` interface has all the methods that the wrapper uses.
+`PettingZooWrapper` is the standard implementation for PettingZoo AEC environments — it assumes "standard" PettingZoo behavior.  
+
+If your environment does not work exactly as `alphazoo` expects, you can override specific methods from the wrapper or implement `IAlphazooGame` from scratch.  
 
 ```python
-class MyWrapper(PettingZooWrapper):
+class MyPettingZooWrapper(PettingZooWrapper):
     def obs_to_state(self, obs, agent_id):
         # channels-last → channels-first
         t = torch.tensor(obs["observation"], dtype=torch.float32).unsqueeze(0)

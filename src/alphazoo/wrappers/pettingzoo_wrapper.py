@@ -10,10 +10,10 @@ from copy import deepcopy
 import numpy as np
 import torch
 
-from .ipettingzoo_wrapper import IPettingZooWrapper
+from ..ialphazoo_game import IAlphazooGame
 
 
-class PettingZooWrapper(IPettingZooWrapper):
+class PettingZooWrapper(IAlphazooGame):
     """
     Wraps a PettingZoo AECEnv to make it compatible with AlphaZero's game interface.
 
@@ -82,8 +82,8 @@ class PettingZooWrapper(IPettingZooWrapper):
         return any(self.env.terminations.values()) or any(self.env.truncations.values())
 
     def get_terminal_value(self) -> float:
-        first_agent = self.env.possible_agents[0]
-        return float(self.env.rewards[first_agent])
+        current_agent = self.env.agent_selection
+        return float(self.env.rewards[current_agent])
 
     def get_current_player(self) -> int:
         return self._extract_player(self.env.agent_selection)

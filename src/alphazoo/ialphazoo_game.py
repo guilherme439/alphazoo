@@ -1,8 +1,9 @@
 """
-Abstract interface for game wrappers used by AlphaZero.
+Abstract game interface for AlphaZoo.
 
-Implement `IPettingZooWrapper` to integrate any 2-player zero-sum game into
-AlphaZoo training.
+Implement `IAlphazooGame` to integrate any 2-player zero-sum game into
+AlphaZoo training. For PettingZoo environments, `PettingZooWrapper` provides
+a ready-made implementation.
 """
 
 from __future__ import annotations
@@ -14,12 +15,12 @@ import numpy as np
 import torch
 
 
-class IPettingZooWrapper(ABC):
+class IAlphazooGame(ABC):
     """
-    Interface that AlphaZoo expects from any game wrapper.
+    Game interface that AlphaZoo expects.
 
     All methods below must be implemented. For PettingZoo environments the
-    concrete `PettingZooWrapper` class provides default implementations
+    concrete `PettingZooWrapper` class provides a default implementation.
     """
 
     # ------------------------------------------------------------------
@@ -33,11 +34,11 @@ class IPettingZooWrapper(ABC):
 
     @abstractmethod
     def step(self, action: int, *args, **kwargs) -> None:
-        """Apply a flat action index and advance the game state."""
+        """Advance the next game state."""
         ...
 
     @abstractmethod
-    def shallow_clone(self) -> "IPettingZooWrapper":
+    def shallow_clone(self) -> "IAlphazooGame":
         """
         Return a lightweight copy of the current game state.
 
@@ -58,9 +59,13 @@ class IPettingZooWrapper(ABC):
     @abstractmethod
     def get_terminal_value(self) -> float:
         """
-        Return the terminal reward from the perspective of player 1.
+        Return final game value.
 
-        Typically +1 for a player-1 win, -1 for a loss, 0 for a draw.
+        If this value is player-dependent or not, should depend on
+        the `player_dependent_value` config.
+        In PettingZoo games this value is usually player dependent,
+        this is, from the perspective of the current player.
+
         Only meaningful after `is_terminal()` returns True.
         """
         ...

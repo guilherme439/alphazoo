@@ -30,6 +30,7 @@ class Gamer:
         recurrent_iterations: int,
         cache_choice: str,
         size_estimate: int = 10000,
+        player_dependent_value: bool = True,
     ) -> None:
         self.buffer = buffer
         self.shared_storage = shared_storage
@@ -40,8 +41,9 @@ class Gamer:
         self.recurrent_iterations = recurrent_iterations
         self.cache_choice = cache_choice
         self.size_estimate = size_estimate
+        self.player_dependent_value = player_dependent_value
 
-        self.explorer = Explorer(search_config, True)
+        self.explorer = Explorer(search_config, True, player_dependent_value)
 
         self.time_to_stop = False
 
@@ -66,7 +68,7 @@ class Gamer:
             cache = create_cache(self.cache_choice, self.size_estimate)
 
         root_node = Node(0)
-        record = GameRecord(num_actions)
+        record = GameRecord(num_actions, self.player_dependent_value)
 
         network_copy: Network_Manager = ray.get(future_network, timeout=200)
         network_copy.check_devices() # Switch to gpu if available
@@ -105,8 +107,11 @@ class Gamer:
         stats["average_bias_value"] /= move_count
 
         terminal_value = game.get_terminal_value()
-        ray.get(self.buffer.save_game_record.remote(record, terminal_value, self.game_index))
+        if self.player_dependent_value and game.get_current_player() != 1:
+            terminal_value = -terminal_value
+        record.set_terminal_value(terminal_value)
 
+        ray.get(self.buffer.save_game_record.remote(record, self.game_index))
         return stats, cache
 
     def play_forever(self) -> None:

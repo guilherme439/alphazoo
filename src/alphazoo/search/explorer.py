@@ -36,9 +36,10 @@ from ..configs.search_config import SearchConfig
 # The explorer runs searches.
 class Explorer:
 
-    def __init__(self, search_config: SearchConfig, training: bool) -> None:
+    def __init__(self, search_config: SearchConfig, training: bool, player_dependent_value: bool = True) -> None:
         self.config = search_config
         self.training = training
+        self.player_dependent_value = player_dependent_value
 
     def run_mcts(
         self,
@@ -145,8 +146,11 @@ class Explorer:
         node.to_play = game.get_current_player()
 
         if game.is_terminal():
-            node.terminal_value = game.get_terminal_value()
-            return node.terminal_value
+            value = game.get_terminal_value()
+            node.terminal_value = value
+            if self.player_dependent_value and node.to_play != 1:
+                value = -value
+            return value
 
         obs = game.observe()
         state = game.obs_to_state(obs, None)
@@ -163,6 +167,8 @@ class Explorer:
             action_probs = softmax(action_probs)
 
         value: float = predicted_value.item()
+        if self.player_dependent_value and node.to_play != 1:
+            value = -value
 
         # Expand the node.
         valid_actions_mask = game.action_mask(obs).flatten()

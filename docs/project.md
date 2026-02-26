@@ -35,13 +35,13 @@ Two execution modes:
 - Action selection: softmax over visit counts early (exploration), argmax late (exploitation), with epsilon fallback
 - Dirichlet noise at root for training diversity
 
-### Game Wrapper (`wrappers/`)
+### Game Interface (`ialphazoo_game.py`)
 
-`IPettingZooWrapper` ABC defines the game interface AlphaZero needs:
+`IAlphazooGame` ABC defines the game interface AlphaZoo needs:
 - `reset()`, `step()`, `observe()`, `obs_to_state()`, `action_mask()`
 - `is_terminal()`, `get_terminal_value()`, `shallow_clone()` (for MCTS rollouts)
 
-`PettingZooWrapper` is the default implementation wrapping any PettingZoo AECEnv.
+`PettingZooWrapper` (`wrappers/pettingzoo_wrapper.py`) is the default implementation of `IAlphazooGame` for PettingZoo AECEnv environments.
 
 ### Self-Play Records (`training/game_record.py`, `training/replay_buffer.py`)
 
@@ -69,6 +69,7 @@ AlphaZooConfig
 ├── CacheConfig (cache type, max size)
 ├── RecurrentConfig (iterations, progressive loss)
 ├── LearningConfig (buffer size, batch extraction, loss functions)
+│   ├── player_dependent_value (bool, default True — see Value Perspective below)
 │   ├── SamplesConfig / EpochsConfig
 ├── SchedulerConfig (LR schedule)
 ├── OptimizerConfig (Adam/SGD)
@@ -77,6 +78,14 @@ AlphaZooConfig
 ```
 
 Loss functions (`utils/functions/loss_functions.py`): KL divergence, cross-entropy, MSE, squared/absolute error for policy and value heads.
+
+### Value Perspective (`player_dependent_value`)
+
+Controls how the network's value output is interpreted relative to players.
+
+- **`True`** (default): Observations are ego-centric (plane 0 = current player's pieces). The network learns to output values from the current player's perspective. Both network values and terminal values from `get_terminal_value()` are negated for player 2 before backpropagation (which stores values from player 1's perspective). Training targets are also flipped for player 2 positions.
+
+- **`False`**: Observations are absolute (same channel layout regardless of player). The network learns to output values from player 1's perspective. No negation is applied during MCTS or target generation.
 
 ### Network Manager (`network_manager.py`)
 

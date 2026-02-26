@@ -60,6 +60,7 @@ class EpochsConfig:
 
 @dataclass
 class LearningConfig:
+    player_dependent_value: bool = True
     shared_storage_size: int = 3
     replay_window_size: int = 10000
     batch_extraction: Literal["local", "distributed"] = "local"
