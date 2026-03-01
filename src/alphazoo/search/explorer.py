@@ -155,16 +155,9 @@ class Explorer:
         obs = game.observe()
         state = game.obs_to_state(obs, None)
         if cache is not None:
-            result = cache.get(state)
-            if result is not None:
-                action_probs, predicted_value = result
-            else:
-                action_probs, predicted_value = self._eval_inference(state)
-                action_probs = softmax(action_probs)
-                cache.put((state, (action_probs, predicted_value)))
+            action_probs, predicted_value = cache.get_and_put_if_absent(state, lambda: self._eval_inference(state))
         else:
             action_probs, predicted_value = self._eval_inference(state)
-            action_probs = softmax(action_probs)
 
         value: float = predicted_value.item()
         if self.player_dependent_value and node.to_play != 1:
@@ -191,8 +184,9 @@ class Explorer:
     def _eval_inference(self, state: Any) -> tuple[Any, Any]:
         if self.network.is_recurrent():
             (policy, value), _ = self.network.recurrent_inference(state, False, self.recurrent_iterations)
-            return policy, value
-        return self.network.inference(state, False)
+        else:
+            policy, value = self.network.inference(state, False)
+        return softmax(policy), value
 
     def max_action(self, visit_counts: list[tuple[int, int]]) -> int:
         max_pair = max(visit_counts, key=lambda pair: pair[0])

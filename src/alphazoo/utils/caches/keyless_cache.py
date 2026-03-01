@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import math
-from typing import Any
+from typing import Any, Callable
 
 import torch
 
@@ -95,6 +95,14 @@ class KeylessCache(Cache):
             self.occupied[index] = True
         self.fingerprints[index] = fingerprint
         self.values[index] = value
+
+    def get_and_put_if_absent(self, key: torch.Tensor, producer: Callable[[], Any]) -> Any:
+        result = self.get(key)
+        if result is not None:
+            return result
+        value = producer()
+        self.put((key, value))
+        return value
 
     def update(self, other: KeylessCache) -> None:
         if not isinstance(other, KeylessCache) or other.size != self.size:

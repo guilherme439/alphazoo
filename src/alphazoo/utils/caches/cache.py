@@ -1,42 +1,56 @@
 from __future__ import annotations
 
-from typing import Any
+from abc import ABC, abstractmethod
+from typing import Any, Callable
+
+import torch
 
 
-class Cache:
+class Cache(ABC):
     ''' Generic Cache '''
 
-    def __init__(self, **kwargs: Any) -> None:
-        return
-
+    @abstractmethod
     def contains(self, key: Any) -> bool:
-        return False
+        ...
 
+    @abstractmethod
     def get(self, key: Any) -> Any | None:
         ''' Returns the value for the key, or None if the key doesn't exist '''
-        return None
+        ...
 
+    @abstractmethod
     def put(self, item: tuple[Any, Any]) -> None:
         ''' Places the item in the cache '''
-        return
+        ...
 
+    @abstractmethod
+    def get_and_put_if_absent(self, key: torch.Tensor, producer: Callable[[], Any]) -> Any:
+        ''' Tries to get the value, if it was not there uses the producer to fill it '''
+        ...
+
+    @abstractmethod
     def update(self, cache: Cache) -> None:
         ''' Updates this cache with items from a cache of the same type '''
-        return
+        ...
 
+    @abstractmethod
     def clear(self) -> None:
         ''' Clears the cache '''
-        return
+        ...
 
+    @abstractmethod    
     def length(self) -> int:
         ''' Returns the number of items in the cache '''
-        return 0
+        ...
 
+    @abstractmethod
     def get_fill_ratio(self) -> float:
-        return 0.0
+        ...
 
+    @abstractmethod
     def get_update_threshold(self) -> float:
-        return 0.0
+        ...
 
+    @abstractmethod
     def get_hit_ratio(self) -> float:
-        return 0.0
+        ...
