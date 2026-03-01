@@ -7,39 +7,15 @@ Modest Standalone AlphaZero implementation for any game (1 or 2 player) with nat
 
 ### Standard AlphaZero
 
-<table>
-<tr>
-<td>✅</td>
-<td>Works with **any game** and **any network**.</td>
-</tr>
-<tr>
-<td>✅</td>
-<td>Can run **sequentially** or fully **asynchronously** (uses <a href="https://github.com/ray-project/ray">Ray</a> under the hood).</td>
-</tr>
-</table>
+&nbsp;&nbsp;&nbsp;&nbsp; ✅ &nbsp; Works with **any game** and **any network**.  
+&nbsp;&nbsp;&nbsp;&nbsp; ✅ &nbsp; Can run **sequential** or fully **asynchronously** (uses [Ray](https://github.com/ray-project/ray) under the hood).
 
-### Beyond AlphaZero
+### Beyond AlphaZero 
 
-<table>
-<tr>
-<td>✅</td>
-<td>Highly optimized **inference cache**.</td>
-</tr>
-<tr>
-<td>✅</td>
-<td>Support for <a href="https://github.com/aks2203/deep-thinking">DeepThinking</a> networks and progressive loss.</td>
-</tr>
-
-<tr>
-<td>✅</td>
-<td>Supports different **value perspectives** (player-dependent, like the original AlphaZero, or _static_).</td>
-</tr>
-<tr>
-<td>✅</td>
-<td>Allows different **data sampling** methods (weighted sampling, multiple epochs, etc.) and multiple **loss functions** (KL divergence, cross-entropy, absolute error, etc.).</td>
-</tr>
-</table>
-
+&nbsp;&nbsp;&nbsp;&nbsp; ✅ &nbsp; Highly optimized **inference cache**.  
+&nbsp;&nbsp;&nbsp;&nbsp; ✅ &nbsp; Support for [DeepThinking](https://github.com/aks2203/deep-thinking) networks and **progressive loss**.  
+&nbsp;&nbsp;&nbsp;&nbsp; ✅ &nbsp; Supports **different value perspectives** (player dependent, like the original alphazero, or _static_).  
+&nbsp;&nbsp;&nbsp;&nbsp; ✅ &nbsp; Allows different **data sampling** methods and loss functions.  
 
 
 ## Getting Started
@@ -102,7 +78,7 @@ trainer.train(on_step_end=on_step_end)
 
 ## Advanced Usage
 
-You can find explanations for more advanced use cases in the [documentation](docs/details.md)
+You can find explanations for more advanced use cases in the [documentation](docs/details.md).
 
 ----
 

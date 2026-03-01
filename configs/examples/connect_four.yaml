@@ -1,0 +1,59 @@
+running:
+  running_mode: "sequential"           # "sequential" or "asynchronous"
+  num_actors: 4
+  training_steps: 500
+  early_fill_per_type: 100             # games played before training starts (to fill replay buffer)
+  early_softmax_moves: 12
+  early_softmax_exploration: 0.5
+  early_random_exploration: 0.5
+  sequential:
+    num_games_per_type_per_step: 12
+
+cache:
+  enabled: true
+  max_size: 8000
+  keep_updated: true                   # share cache across games within a self-play step
+
+# recurrent:                           # uncomment for AlphaZooRecurrentNet
+#   train_iterations: 3
+#   pred_iterations: 3
+#   use_progressive_loss: true
+#   prog_alpha: 0.5
+
+learning:
+  player_dependent_value: true
+  replay_window_size: 10000
+  batch_extraction: "local"            # "local" or "distributed"
+  learning_method: "samples"           # "samples" or "epochs"
+  value_loss: "SE"                     # "SE" (squared error) or "AE" (absolute error)
+  policy_loss: "CEL"                   # "CEL" (cross-entropy), "KLD" (KL divergence), or "MSE" (Mean squared error)
+  samples:
+    batch_size: 64
+    num_samples: 128
+    with_replacement: true
+    late_heavy: true                   # bias sampling toward more recent positions
+
+optimizer:
+  optimizer_choice: "Adam"             # "Adam" or "SGD"
+
+scheduler:
+  starting_lr: 0.001
+  boundaries: [10000, 20000]
+  gamma: 0.2
+
+search:
+  simulation:
+    mcts_simulations: 100
+    keep_subtree: true
+  uct:
+    pb_c_base: 10000
+    pb_c_init: 1.15
+  exploration:
+    number_of_softmax_moves: 15
+    epsilon_softmax_exploration: 0.04
+    epsilon_random_exploration: 0.003
+    value_factor: 1.0
+    root_exploration_distribution: "gamma"   # "gamma" is the only available right now
+    root_exploration_fraction: 0.20
+    root_dist_alpha: 0.15
+    root_dist_beta: 1.0
