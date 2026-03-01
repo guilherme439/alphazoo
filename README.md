@@ -10,19 +10,22 @@ Standalone AlphaZero implementation with [PettingZoo](https://github.com/Farama-
 
 AlphaZoo works with any PettingZoo AEC environment. Pass the env, a network, and a config — then call `train()`.
 
+### Standard network
+
+Subclass `AlphaZooNet` and implement `forward(x) -> (policy_logits, value_estimate)`.
+
 ```python
 import torch
 import torch.nn as nn
 from pettingzoo.classic import connect_four_v3
 
-from alphazoo import AlphaZoo, AlphaZooConfig
+from alphazoo import AlphaZoo, AlphaZooConfig, AlphaZooNet
 from alphazoo.configs.alphazoo_config import RunningConfig, SequentialConfig
 
 
-class MyNet(nn.Module):
+class MyNet(AlphaZooNet):
     def __init__(self):
         super().__init__()
-        self.recurrent = False
         self.fc = nn.Linear(6 * 7 * 2, 64)
         self.policy_head = nn.Linear(64, 7)
         self.value_head = nn.Linear(64, 1)
@@ -61,11 +64,11 @@ trainer.train(on_step_end=on_step_end)
 
 ## Customization
 
-`IAlphazooGame` is the abstract game interface that AlphaZoo expects (it lists all the methods that must be implemented).  
+`IAlphazooGame` is the abstract game interface that AlphaZoo expects (it lists all the methods that must be implemented).
 
-`PettingZooWrapper` is the standard implementation for PettingZoo AEC environments — it assumes "standard" PettingZoo behavior.  
+`PettingZooWrapper` is the standard implementation for PettingZoo AEC environments — it assumes "standard" PettingZoo behavior.
 
-If your environment does not work exactly as `alphazoo` expects, you can override specific methods from the wrapper or implement `IAlphazooGame` from scratch.  
+If your environment does not work exactly as `alphazoo` expects, you can override specific methods from the wrapper or implement `IAlphazooGame` from scratch.
 
 ```python
 class MyPettingZooWrapper(PettingZooWrapper):

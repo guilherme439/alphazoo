@@ -14,14 +14,13 @@ from pettingzoo.classic import connect_four_v3
 from alphazoo.search.node import Node
 from alphazoo.search.explorer import Explorer
 from alphazoo.configs import SearchConfig
-from alphazoo.network_manager import Network_Manager
+from alphazoo.networks import AlphaZooNet, NetworkManager
 from .helpers import make_pettingzoo_game
 
 
-class ConnectFourNet(nn.Module):
+class ConnectFourNet(AlphaZooNet):
     def __init__(self):
         super().__init__()
-        self.recurrent = False
         self.conv = nn.Conv2d(2, 8, kernel_size=3, padding=1)
         self.fc = nn.Linear(8 * 6 * 7, 32)
         self.policy_head = nn.Linear(32, 7)
@@ -35,11 +34,10 @@ class ConnectFourNet(nn.Module):
         return self.policy_head(x), torch.tanh(self.value_head(x))
 
 
-class UniformConnectFourNet(nn.Module):
+class UniformConnectFourNet(AlphaZooNet):
     """Returns uniform policy and zero value — forces MCTS to rely on rollouts."""
     def __init__(self):
         super().__init__()
-        self.recurrent = False
         self.dummy = nn.Linear(1, 1)
 
     def forward(self, x):
@@ -55,7 +53,7 @@ def search_config():
 
 @pytest.fixture
 def network():
-    return Network_Manager(ConnectFourNet())
+    return NetworkManager(ConnectFourNet())
 
 
 def make_game():
@@ -175,7 +173,7 @@ class TestConnectFourStrategic:
     def test_finds_winning_move_for_player_1(self, search_config):
         """p1 has 3 in col 0, can win by playing col 0."""
         cfg = make_high_sim_config(search_config, n_sims=64)
-        net = Network_Manager(UniformConnectFourNet())
+        net = NetworkManager(UniformConnectFourNet())
         explorer = Explorer(cfg, training=False)
 
         game = make_game()
@@ -190,7 +188,7 @@ class TestConnectFourStrategic:
     def test_finds_winning_move_for_player_2(self, search_config):
         """p2 has 3 in col 2, can win by playing col 2."""
         cfg = make_high_sim_config(search_config, n_sims=64)
-        net = Network_Manager(UniformConnectFourNet())
+        net = NetworkManager(UniformConnectFourNet())
         explorer = Explorer(cfg, training=False)
 
         game = make_game()
@@ -207,7 +205,7 @@ class TestConnectFourStrategic:
     def test_winning_move_gets_most_visits(self, search_config):
         """The winning child node should accumulate the most visits."""
         cfg = make_high_sim_config(search_config, n_sims=64)
-        net = Network_Manager(UniformConnectFourNet())
+        net = NetworkManager(UniformConnectFourNet())
         explorer = Explorer(cfg, training=False)
 
         game = make_game()

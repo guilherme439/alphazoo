@@ -2,30 +2,30 @@ from __future__ import annotations
 
 import math
 import os
-import time
-import psutil
 import resource
-from typing import Any, Callable
+import time
 from copy import deepcopy
 from random import randrange
+from typing import Any, Callable
 
+import more_itertools
+import numpy as np
+import psutil
 import ray
 import torch
-from torch import nn, Tensor
+from torch import Tensor, nn
 from torch.optim.lr_scheduler import MultiStepLR
-import numpy as np
-import more_itertools
-
-from ..network_manager import Network_Manager
-from .gamer import Gamer
-from .replay_buffer import ReplayBuffer
-from ..utils.remote_storage import RemoteStorage
-from ..utils.caches.cache import Cache
-
-from ..utils.functions.loss_functions import KLDivergence, MSError, SquaredError, AbsoluteError
-from ..utils.functions.general_utils import create_optimizer
 
 from ..configs.alphazoo_config import AlphaZooConfig
+from ..networks.interfaces import AlphaZooNet, AlphaZooRecurrentNet
+from ..networks.network_manager import NetworkManager
+from ..utils.caches.cache import Cache
+from ..utils.functions.general_utils import create_optimizer
+from ..utils.functions.loss_functions import (AbsoluteError, KLDivergence,
+                                              MSError, SquaredError)
+from ..utils.remote_storage import RemoteStorage
+from .gamer import Gamer
+from .replay_buffer import ReplayBuffer
 
 StepCallback = Callable[["AlphaZoo", int, dict[str, Any]], None]
 LossFunction = Callable[[Tensor, Tensor], Tensor]
@@ -37,7 +37,7 @@ class AlphaZoo:
         self,
         env: Any,
         config: AlphaZooConfig,
-        model: nn.Module,
+        model: AlphaZooNet | AlphaZooRecurrentNet,
         optimizer_state_dict: dict | None = None,
         scheduler_state_dict: dict | None = None,
         replay_buffer_state: dict | None = None,
@@ -67,7 +67,13 @@ class AlphaZoo:
         momentum = config.optimizer.sgd.momentum
         nesterov = config.optimizer.sgd.nesterov
 
-        self.latest_network = Network_Manager(model)
+        if isinstance(model, AlphaZooRecurrentNet) and config.recurrent is None:
+            raise ValueError(
+                "A RecurrentConfig must be provided when using an AlphaZooRecurrentNet. "
+                "Add recurrent=RecurrentConfig(...) to your AlphaZooConfig."
+            )
+
+        self.latest_network = NetworkManager(model)
         self.optimizer = create_optimizer(
             self.latest_network.get_model(),
             optimizer_name, 
@@ -111,13 +117,22 @@ class AlphaZoo:
 
         storage_frequency = 1
 
-        pred_iterations = config.recurrent.pred_iterations
-        prog_alpha = config.recurrent.alpha
+        if config.recurrent is not None:
+            pred_iterations = config.recurrent.pred_iterations
+            prog_alpha = config.recurrent.prog_alpha
+            use_progressive_loss = config.recurrent.use_progressive_loss
+        else:
+            pred_iterations = 1
+            prog_alpha = 0.0
+            use_progressive_loss = False
 
-        # dummy forward pass to initialize the weights
+        # dummy forward pass to initialize lazy layers
         obs = self.games[0].observe()
         dummy_state = self.games[0].obs_to_state(obs, None)
-        self.latest_network.inference(dummy_state, False, 1)
+        if self.latest_network.is_recurrent():
+            self.latest_network.recurrent_inference(dummy_state, False, iters_to_do=1)
+        else:
+            self.latest_network.inference(dummy_state, False)
 
         # ------------- STORAGE AND BUFFERS SETUP -------------- #
 
@@ -175,6 +190,7 @@ class AlphaZoo:
         elif running_mode == "asynchronous":
             print("\n\nRunning until training step number " + str(training_steps) +
                   " with " + str(update_delay) + "s of delay between each step:")
+                  
         if early_fill_games_per_type > 0:
             total_early_fill = early_fill_games_per_type * self.num_game_types
             print("-Playing " + str(total_early_fill) + " initial games to fill the replay buffer.")
@@ -205,7 +221,7 @@ class AlphaZoo:
                 self.games[0],
                 0,
                 self.config.search,
-                pred_iterations[0],
+                pred_iterations,
                 cache_choice,
                 cache_max,
                 self.config.learning.player_dependent_value,
@@ -239,11 +255,12 @@ class AlphaZoo:
 
             print("\n\nLearning rate: " + str(self.scheduler.get_last_lr()[0]))
             self.train_network(
-                learning_method, 
-                policy_loss_function, 
-                value_loss_function, 
-                normalize_policy, 
-                prog_alpha, 
+                learning_method,
+                policy_loss_function,
+                value_loss_function,
+                normalize_policy,
+                prog_alpha,
+                use_progressive_loss,
                 batch_size
             )
 
@@ -308,7 +325,8 @@ class AlphaZoo:
     ) -> None:
         start = time.time()
 
-        pred_iterations_list = self.config.recurrent.pred_iterations
+        recurrent_config = self.config.recurrent
+        pred_iterations = recurrent_config.pred_iterations if recurrent_config is not None else 1
         num_actors = self.config.running.num_actors
 
         search_config = deepcopy(self.config.search)
@@ -319,9 +337,8 @@ class AlphaZoo:
 
         total_games = self.num_game_types * num_games_per_type
         total_moves: int = 0
-        print(text)
+        #print(text)
         for i, game in enumerate(self.games):
-            iterations = pred_iterations_list[i]
             game_index = i
             actor_list = [Gamer.remote(
                 self.replay_buffer,
@@ -329,7 +346,7 @@ class AlphaZoo:
                 game,
                 game_index,
                 search_config,
-                iterations,
+                pred_iterations,
                 cache_choice,
                 cache_max,
                 self.config.learning.player_dependent_value,
@@ -397,11 +414,13 @@ class AlphaZoo:
         value_loss_function: LossFunction,
         normalize_policy: bool,
         prog_alpha: float,
+        use_progressive_loss: bool,
         batch_size: int,
     ) -> None:
         start = time.time()
 
-        train_iterations = self.config.recurrent.train_iterations
+        recurrent_config = self.config.recurrent
+        train_iterations = recurrent_config.train_iterations if recurrent_config is not None else 1
         batch_extraction = self.config.learning.batch_extraction
 
         replay_size: int = ray.get(self.replay_buffer.len.remote(), timeout=120)
@@ -412,11 +431,13 @@ class AlphaZoo:
         if learning_method == "epochs":
             self.train_with_epochs(batch_extraction, batch_size, replay_size,
                                    policy_loss_function, value_loss_function,
-                                   normalize_policy, train_iterations, prog_alpha)
+                                   normalize_policy, train_iterations, prog_alpha,
+                                   use_progressive_loss)
         elif learning_method == "samples":
             self.train_with_samples(batch_extraction, batch_size, replay_size,
                                     policy_loss_function, value_loss_function,
-                                    normalize_policy, train_iterations, prog_alpha)
+                                    normalize_policy, train_iterations, prog_alpha,
+                                    use_progressive_loss)
         else:
             raise Exception("Bad learning_method config.")
 
@@ -431,8 +452,9 @@ class AlphaZoo:
         policy_loss_function: LossFunction,
         value_loss_function: LossFunction,
         normalize_policy: bool,
-        train_iterations: list[int],
+        train_iterations: int,
         prog_alpha: float,
+        use_progressive_loss: bool,
     ) -> None:
         learning_epochs = self.config.learning.epochs.learning_epochs
 
@@ -473,7 +495,7 @@ class AlphaZoo:
 
                 value_loss, policy_loss, combined_loss = self.batch_update_weights(
                     batch, policy_loss_function, value_loss_function,
-                    normalize_policy, train_iterations, prog_alpha)
+                    normalize_policy, train_iterations, prog_alpha, use_progressive_loss)
 
                 epoch_value_loss += value_loss
                 epoch_policy_loss += policy_loss
@@ -500,8 +522,9 @@ class AlphaZoo:
         policy_loss_function: LossFunction,
         value_loss_function: LossFunction,
         normalize_policy: bool,
-        train_iterations: list[int],
+        train_iterations: int,
         prog_alpha: float,
+        use_progressive_loss: bool,
     ) -> None:
         num_samples = self.config.learning.samples.num_samples
         late_heavy = self.config.learning.samples.late_heavy
@@ -547,7 +570,7 @@ class AlphaZoo:
 
             value_loss, policy_loss, combined_loss = self.batch_update_weights(
                 batch, policy_loss_function, value_loss_function,
-                normalize_policy, train_iterations, prog_alpha)
+                normalize_policy, train_iterations, prog_alpha, use_progressive_loss)
 
             average_value_loss += value_loss
             average_policy_loss += policy_loss
@@ -567,8 +590,9 @@ class AlphaZoo:
         policy_loss_function: LossFunction,
         value_loss_function: LossFunction,
         normalize_policy: bool,
-        train_iterations: list[int],
+        train_iterations: int,
         alpha: float,
+        use_progressive_loss: bool,
     ) -> tuple[float, float, float]:
         self.latest_network.get_model().train()
         self.optimizer.zero_grad()
@@ -577,25 +601,70 @@ class AlphaZoo:
         policy_loss: Tensor | float = 0.0
         combined_loss: Tensor | float = 0.0
 
-        if self.latest_network.get_model().recurrent:
-            data_by_game = more_itertools.bucket(batch, key=lambda x: x[2])
-            for index in sorted(data_by_game):
-                batch_data = list(data_by_game[index])
-                batch_size = len(batch_data)
+        if self.latest_network.is_recurrent():
+            value_loss, policy_loss, combined_loss = self._recurrent_batch_update(
+                batch, policy_loss_function, value_loss_function,
+                normalize_policy, train_iterations, alpha, use_progressive_loss)
+        else:
+            value_loss, policy_loss, combined_loss = self._standard_batch_update(
+                batch, policy_loss_function, value_loss_function, normalize_policy)
 
-                states, targets, indexes = list(zip(*batch_data))
-                batch_input = torch.cat(states, 0)
+        loss = combined_loss
 
-                recurrent_iterations = train_iterations[index]
+        loss.backward()  # type: ignore[union-attr]
+        self.optimizer.step()
+        self.scheduler.step()
 
+        return value_loss.item(), policy_loss.item(), combined_loss.item()  # type: ignore[union-attr]
+
+    def _standard_batch_update(
+        self,
+        batch: list[Any],
+        policy_loss_function: LossFunction,
+        value_loss_function: LossFunction,
+        normalize_policy: bool,
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        states, targets, indexes = list(zip(*batch))
+        batch_input = torch.cat(states, 0)
+        batch_size = len(indexes)
+        outputs = self.latest_network.inference(batch_input, True)
+        return self.calculate_loss(
+            outputs, targets, batch_size,
+            policy_loss_function, value_loss_function, normalize_policy)
+
+    def _recurrent_batch_update(
+        self,
+        batch: list[Any],
+        policy_loss_function: LossFunction,
+        value_loss_function: LossFunction,
+        normalize_policy: bool,
+        train_iterations: int,
+        alpha: float,
+        use_progressive_loss: bool,
+    ) -> tuple[Tensor | float, Tensor | float, Tensor | float]:
+        value_loss: Tensor | float = 0.0
+        policy_loss: Tensor | float = 0.0
+        combined_loss: Tensor | float = 0.0
+
+        data_by_game = more_itertools.bucket(batch, key=lambda x: x[2])
+        for index in sorted(data_by_game):
+            batch_data = list(data_by_game[index])
+            batch_size = len(batch_data)
+
+            states, targets, indexes = list(zip(*batch_data))
+            batch_input = torch.cat(states, 0)
+            recurrent_iterations = train_iterations
+
+            if use_progressive_loss:
                 total_value_loss: Tensor | float = 0.0
                 total_policy_loss: Tensor | float = 0.0
                 total_combined_loss: Tensor | float = 0.0
                 prog_value_loss: Tensor | float = 0.0
                 prog_policy_loss: Tensor | float = 0.0
                 prog_combined_loss: Tensor | float = 0.0
+
                 if alpha != 1:
-                    outputs, _ = self.latest_network.inference(batch_input, True, recurrent_iterations)
+                    outputs, _ = self.latest_network.recurrent_inference(batch_input, True, recurrent_iterations)
                     total_value_loss, total_policy_loss, total_combined_loss = self.calculate_loss(
                         outputs, targets, batch_size,
                         policy_loss_function, value_loss_function, normalize_policy)
@@ -609,23 +678,13 @@ class AlphaZoo:
                 value_loss = (1 - alpha) * total_value_loss + alpha * prog_value_loss
                 policy_loss = (1 - alpha) * total_policy_loss + alpha * prog_policy_loss
                 combined_loss = (1 - alpha) * total_combined_loss + alpha * prog_combined_loss
+            else:
+                outputs, _ = self.latest_network.recurrent_inference(batch_input, True, recurrent_iterations)
+                value_loss, policy_loss, combined_loss = self.calculate_loss(
+                    outputs, targets, batch_size,
+                    policy_loss_function, value_loss_function, normalize_policy)
 
-        else:
-            states, targets, indexes = list(zip(*batch))
-            batch_input = torch.cat(states, 0)
-            batch_size = len(indexes)
-            outputs = self.latest_network.inference(batch_input, True, train_iterations)
-            value_loss, policy_loss, combined_loss = self.calculate_loss(
-                outputs, targets, batch_size,
-                policy_loss_function, value_loss_function, normalize_policy)
-
-        loss = combined_loss
-
-        loss.backward()  # type: ignore[union-attr]
-        self.optimizer.step()
-        self.scheduler.step()
-
-        return value_loss.item(), policy_loss.item(), combined_loss.item()  # type: ignore[union-attr]
+        return value_loss, policy_loss, combined_loss
 
     def calculate_loss(
         self,
@@ -682,12 +741,12 @@ class AlphaZoo:
         k = randrange(1, max_iters - n + 1)
 
         if n > 0:
-            _, interim_thought = self.latest_network.inference(inputs, True, iters_to_do=n)
+            _, interim_thought = self.latest_network.recurrent_inference(inputs, True, iters_to_do=n)
             interim_thought = interim_thought.detach()
         else:
             interim_thought = None
 
-        outputs, _ = self.latest_network.inference(inputs, True, iters_to_do=k, interim_thought=interim_thought)
+        outputs, _ = self.latest_network.recurrent_inference(inputs, True, iters_to_do=k, interim_thought=interim_thought)
         return outputs
 
     ##########################################################################

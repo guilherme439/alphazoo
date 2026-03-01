@@ -38,10 +38,11 @@ class CacheConfig:
 
 @dataclass
 class RecurrentConfig:
-    train_iterations: list[int] = field(default_factory=lambda: [1])
-    pred_iterations: list[int] = field(default_factory=lambda: [1])
+    train_iterations: int = 1
+    pred_iterations: int = 1
     test_iterations: int = 1
-    alpha: float = 0.0
+    use_progressive_loss: bool = True
+    prog_alpha: float = 0.0
 
 
 @dataclass
@@ -97,7 +98,7 @@ class AlphaZooConfig:
     running: RunningConfig = field(default_factory=RunningConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
     learning: LearningConfig = field(default_factory=LearningConfig)
-    recurrent: RecurrentConfig = field(default_factory=RecurrentConfig)
+    recurrent: RecurrentConfig | None = None
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     search: SearchConfig = field(default_factory=SearchConfig)

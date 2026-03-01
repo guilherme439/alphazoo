@@ -5,16 +5,6 @@
 *.swo
 *~
 
-# AlphaZoo specific
-checkpoints/
-plots/
-logs/
-networks/
-buffers/
-*.pkl
-*.pth
-*.pt
-
 # Ray
 /tmp/ray/
 

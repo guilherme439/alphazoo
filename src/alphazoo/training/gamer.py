@@ -9,7 +9,7 @@ import numpy as np
 
 from ..search.node import Node
 from ..search.explorer import Explorer
-from ..network_manager import Network_Manager
+from ..networks.network_manager import NetworkManager
 from ..utils.caches.cache import Cache
 from ..configs.search_config import SearchConfig
 from .game_record import GameRecord
@@ -70,7 +70,7 @@ class Gamer:
         root_node = Node(0)
         record = GameRecord(num_actions, self.player_dependent_value)
 
-        network_copy: Network_Manager = ray.get(future_network, timeout=200)
+        network_copy: NetworkManager = ray.get(future_network, timeout=200)
         network_copy.check_devices() # Switch to gpu if available
 
         move_count = 0

@@ -6,6 +6,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 
+from alphazoo.networks import AlphaZooNet
+
 
 class MockGame:
     """
@@ -59,12 +61,11 @@ class MockGame:
         return self._depth
 
 
-class MockNet(nn.Module):
+class MockNet(AlphaZooNet):
     """Network that returns a fixed policy and value."""
 
     def __init__(self, num_actions=4, fixed_value=0.0, fixed_policy=None):
         super().__init__()
-        self.recurrent = False
         self.num_actions = num_actions
         self.fixed_value = fixed_value
         self.fixed_policy = fixed_policy
@@ -81,13 +82,16 @@ class MockNet(nn.Module):
 
 
 class MockNetworkManager:
-    """Mimics Network_Manager's interface."""
+    """Test double for NetworkManager — always acts as a standard (non-recurrent) network."""
 
     def __init__(self, model):
         self.model = model
         self.device = "cpu"
 
-    def inference(self, state, training, iters):
+    def is_recurrent(self):
+        return False
+
+    def inference(self, state, training):
         self.model.eval()
         with torch.no_grad():
             p, v = self.model(state)

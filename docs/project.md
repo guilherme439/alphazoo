@@ -9,11 +9,13 @@ Standalone AlphaZero implementation with PettingZoo compatibility. Trains neural
 Used programmatically:
 ```python
 from alphazoo import AlphaZoo, AlphaZooConfig
-trainer = AlphaZoo(env=pettingzoo_aec_env, config=config, model=pytorch_model)
+trainer = AlphaZoo(env=pettingzoo_aec_env, config=config, model=my_net)
 trainer.train(on_step_end=callback)
 ```
 
-The model must be a `nn.Module` with a `recurrent` boolean attribute. Dual-head output: (policy_logits, value_estimate).
+The model must subclass either `AlphaZooNet` or `AlphaZooRecurrentNet` (both from `alphazoo.networks`):
+- **`AlphaZooNet`**: standard network. `forward(x) -> (policy_logits, value_estimate)`.
+- **`AlphaZooRecurrentNet`**: recurrent network. `forward(x, iters_to_do, interim_thought=None) -> ((policy_logits, value_estimate), interim_thought)`. Requires a `RecurrentConfig` in `AlphaZooConfig`.
 
 ## Architecture
 
@@ -67,7 +69,10 @@ Dataclass hierarchy with defaults:
 AlphaZooConfig
 ├── RunningConfig (sequential vs async, num actors, training steps)
 ├── CacheConfig (cache type, max size)
-├── RecurrentConfig (iterations, progressive loss)
+├── RecurrentConfig | None  (required when using AlphaZooRecurrentNet)
+│   ├── train_iterations, pred_iterations, test_iterations
+│   ├── use_progressive_loss: bool  (whether to use progressive loss)
+│   └── alpha: float  (progressive loss blend weight, used when use_progressive_loss=True)
 ├── LearningConfig (buffer size, batch extraction, loss functions)
 │   ├── player_dependent_value (bool, default True — see Value Perspective below)
 │   ├── SamplesConfig / EpochsConfig
@@ -87,9 +92,15 @@ Controls how the network's value output is interpreted relative to players.
 
 - **`False`**: Observations are absolute (same channel layout regardless of player). The network learns to output values from player 1's perspective. No negation is applied during MCTS or target generation.
 
-### Network Manager (`network_manager.py`)
+### Network Interfaces and Manager (`networks/`)
 
-Wraps PyTorch model with device management (CPU/GPU switching for inference vs training).
+**`AlphaZooNet`** and **`AlphaZooRecurrentNet`** are abstract base classes (ABCs) that define the two network interfaces AlphaZoo accepts. Users subclass one of these instead of `nn.Module` directly. Internal architecture is unconstrained — e.g., separate actor and critic heads with no shared trunk are valid.
+
+**`NetworkManager`** wraps either ABC with device management (CPU/GPU switching for inference vs training). Exposes a single `inference()` method:
+- For `AlphaZooNet`: returns `(policy_logits, value_estimate)`.
+- For `AlphaZooRecurrentNet`: returns `((policy_logits, value_estimate), interim_thought)`.
+
+Use `is_recurrent_network(network_manager)` (from `utils/functions/general_utils.py`) to branch on network type at call sites.
 
 ## Key Dependencies
 

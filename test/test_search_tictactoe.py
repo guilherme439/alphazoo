@@ -15,14 +15,13 @@ from alphazoo.search.node import Node
 from alphazoo.search.explorer import Explorer
 from alphazoo.configs import SearchConfig
 from alphazoo.configs.search_config import SimulationConfig, UCTConfig, ExplorationConfig
-from alphazoo.network_manager import Network_Manager
+from alphazoo.networks import AlphaZooNet, NetworkManager
 from .helpers import make_pettingzoo_game
 
 
-class TicTacToeNet(nn.Module):
+class TicTacToeNet(AlphaZooNet):
     def __init__(self):
         super().__init__()
-        self.recurrent = False
         self.fc = nn.Linear(3 * 3 * 2, 32)
         self.policy_head = nn.Linear(32, 9)
         self.value_head = nn.Linear(32, 1)
@@ -33,11 +32,10 @@ class TicTacToeNet(nn.Module):
         return self.policy_head(x), torch.tanh(self.value_head(x))
 
 
-class UniformTicTacToeNet(nn.Module):
+class UniformTicTacToeNet(AlphaZooNet):
     """Returns uniform policy and zero value — forces MCTS to rely on rollouts."""
     def __init__(self):
         super().__init__()
-        self.recurrent = False
         self.dummy = nn.Linear(1, 1)
 
     def forward(self, x):
@@ -53,7 +51,7 @@ def search_config():
 
 @pytest.fixture
 def network():
-    return Network_Manager(TicTacToeNet())
+    return NetworkManager(TicTacToeNet())
 
 
 def make_game():
@@ -138,7 +136,7 @@ class TestTicTacToeStrategic:
     def test_finds_winning_move_for_player_1(self, search_config):
         """p1 has diagonal 0-4, can win with 8. MCTS should find it."""
         cfg = make_high_sim_config(search_config, n_sims=64)
-        net = Network_Manager(UniformTicTacToeNet())
+        net = NetworkManager(UniformTicTacToeNet())
         explorer = Explorer(cfg, training=False)
 
         game = make_game()
@@ -155,7 +153,7 @@ class TestTicTacToeStrategic:
     def test_finds_winning_move_for_player_2(self, search_config):
         """p2 has 3-4, can win with 5 (middle row). MCTS should find it."""
         cfg = make_high_sim_config(search_config, n_sims=64)
-        net = Network_Manager(UniformTicTacToeNet())
+        net = NetworkManager(UniformTicTacToeNet())
         explorer = Explorer(cfg, training=False)
 
         game = make_game()
@@ -173,7 +171,7 @@ class TestTicTacToeStrategic:
     def test_winning_move_gets_most_visits(self, search_config):
         """The winning child node should accumulate the most visits."""
         cfg = make_high_sim_config(search_config, n_sims=64)
-        net = Network_Manager(UniformTicTacToeNet())
+        net = NetworkManager(UniformTicTacToeNet())
         explorer = Explorer(cfg, training=False)
 
         game = make_game()

@@ -8,7 +8,7 @@ import torch
 from scipy.special import softmax
 
 from .node import Node
-from ..network_manager import Network_Manager
+from ..networks.network_manager import NetworkManager
 from ..utils.caches.cache import Cache
 from ..configs.search_config import SearchConfig
 
@@ -44,9 +44,9 @@ class Explorer:
     def run_mcts(
         self,
         game: Any,
-        network: Network_Manager,
+        network: NetworkManager,
         root_node: Node,
-        recurrent_iterations: int = 2,
+        recurrent_iterations: int = 1,
         cache: Cache | None = None,
     ) -> tuple[int, Node, float]:
         self.network = network
@@ -159,11 +159,11 @@ class Explorer:
             if result is not None:
                 action_probs, predicted_value = result
             else:
-                action_probs, predicted_value = self.network.inference(state, False, self.recurrent_iterations)
+                action_probs, predicted_value = self._eval_inference(state)
                 action_probs = softmax(action_probs)
                 cache.put((state, (action_probs, predicted_value)))
         else:
-            action_probs, predicted_value = self.network.inference(state, False, self.recurrent_iterations)
+            action_probs, predicted_value = self._eval_inference(state)
             action_probs = softmax(action_probs)
 
         value: float = predicted_value.item()
@@ -187,6 +187,12 @@ class Explorer:
                 node.children[i] = Node(probs[i] / total)
 
         return value
+
+    def _eval_inference(self, state: Any) -> tuple[Any, Any]:
+        if self.network.is_recurrent():
+            (policy, value), _ = self.network.recurrent_inference(state, False, self.recurrent_iterations)
+            return policy, value
+        return self.network.inference(state, False)
 
     def max_action(self, visit_counts: list[tuple[int, int]]) -> int:
         max_pair = max(visit_counts, key=lambda pair: pair[0])

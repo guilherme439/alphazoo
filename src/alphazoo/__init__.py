@@ -12,7 +12,7 @@ from .training.game_record import GameRecord
 from .search.explorer import Explorer
 from .search.node import Node
 
-from .network_manager import Network_Manager
+from .networks import AlphaZooNet, AlphaZooRecurrentNet, NetworkManager
 
 from .configs.alphazoo_config import AlphaZooConfig
 from .ialphazoo_game import IAlphazooGame
@@ -26,7 +26,9 @@ __all__ = [
     "GameRecord",
     "Explorer",
     "Node",
-    "Network_Manager",
+    "AlphaZooNet",
+    "AlphaZooRecurrentNet",
+    "NetworkManager",
     "AlphaZooConfig",
     "IAlphazooGame",
     "PettingZooWrapper",

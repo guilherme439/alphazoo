@@ -6,9 +6,10 @@ import torch.nn as nn
 from pettingzoo.classic import connect_four_v3
 
 from alphazoo.training.alphazoo import AlphaZoo
+from alphazoo.networks import AlphaZooNet
 from alphazoo.configs.alphazoo_config import (
     AlphaZooConfig, RunningConfig, SequentialConfig, CacheConfig,
-    RecurrentConfig, LearningConfig, EpochsConfig,
+    LearningConfig, EpochsConfig,
     SamplesConfig, SchedulerConfig, OptimizerConfig, SGDConfig,
 )
 from alphazoo.configs import SearchConfig
@@ -16,11 +17,9 @@ from alphazoo.configs import SearchConfig
 
 # --------------- Small Network --------------- #
 
-class ConnectFourNet(nn.Module):
+class ConnectFourNet(AlphaZooNet):
     def __init__(self) -> None:
         super().__init__()
-        self.recurrent = False
-
         self.conv1 = nn.Conv2d(2, 16, kernel_size=3, padding=1)
         self.conv2 = nn.Conv2d(16, 16, kernel_size=3, padding=1)
         self.fc = nn.Linear(16 * 6 * 7, 64)
@@ -59,12 +58,6 @@ def test_connect_four_training() -> None:
             sequential=SequentialConfig(num_games_per_type_per_step=2),
         ),
         cache=CacheConfig(cache_choice="disabled", max_size=1000, keep_updated=False),
-        recurrent=RecurrentConfig(
-            train_iterations=[1],
-            pred_iterations=[[1]],
-            test_iterations=1,
-            alpha=1.0,
-        ),
         learning=LearningConfig(
             shared_storage_size=3,
             replay_window_size=500,
