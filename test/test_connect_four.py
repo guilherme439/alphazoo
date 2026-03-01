@@ -62,7 +62,6 @@ def test_connect_four_training() -> None:
             shared_storage_size=3,
             replay_window_size=500,
             learning_method="epochs",
-            batch_extraction="local",
             value_loss="SE",
             policy_loss="KLD",
             normalize_cel=False,

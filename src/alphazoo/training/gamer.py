@@ -22,7 +22,7 @@ class Gamer:
 
     def __init__(
         self,
-        buffer: Any,
+        record_queue: Any,
         shared_storage: Any,
         game: Any,
         game_index: int,
@@ -32,7 +32,7 @@ class Gamer:
         cache_max_size: int = 8000,
         player_dependent_value: bool = True,
     ) -> None:
-        self.buffer = buffer
+        self.record_queue = record_queue
         self.shared_storage = shared_storage
         self.game = game
         self.game_index = game_index
@@ -111,7 +111,7 @@ class Gamer:
             terminal_value = -terminal_value
         record.set_terminal_value(terminal_value)
 
-        ray.get(self.buffer.save_game_record.remote(record, self.game_index))
+        self.record_queue.put((record, self.game_index))
         return stats, cache
 
     def play_forever(self) -> None:

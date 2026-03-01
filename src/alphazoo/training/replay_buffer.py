@@ -5,10 +5,8 @@ from typing import Any
 
 import numpy as np
 import torch
-import ray
 
 
-@ray.remote(scheduling_strategy="SPREAD")
 class ReplayBuffer:
 
     def __init__(self, window_size: int, batch_size: int) -> None:

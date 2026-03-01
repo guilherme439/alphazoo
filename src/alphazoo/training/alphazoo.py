@@ -9,10 +9,10 @@ from random import randrange
 from typing import Any, Callable
 
 import more_itertools
-import numpy as np
 import psutil
 import ray
 import torch
+from ray.util.queue import Queue
 from torch import Tensor, nn
 from torch.optim.lr_scheduler import MultiStepLR
 
@@ -151,9 +151,10 @@ class AlphaZoo:
         elif learning_method == "samples":
             batch_size = config.learning.samples.batch_size
 
-        self.replay_buffer = ReplayBuffer.remote(replay_window_size, batch_size)
+        self.replay_buffer = ReplayBuffer(replay_window_size, batch_size)
+        self.record_queue: Queue = Queue()
         if self._replay_buffer_state is not None:
-            ray.get(self.replay_buffer.load_state.remote(self._replay_buffer_state))
+            self.replay_buffer.load_state(self._replay_buffer_state)
             self._replay_buffer_state = None
 
         # ------------------- LOSS FUNCTIONS ------------------- #
@@ -216,7 +217,7 @@ class AlphaZoo:
         termination_futures: list[Any] = []
         if running_mode == "asynchronous":
             actor_list = [Gamer.options(max_concurrency=2).remote(
-                self.replay_buffer,
+                self.record_queue,
                 self.network_storage,
                 self.games[0],
                 0,
@@ -283,7 +284,7 @@ class AlphaZoo:
             metrics["value_loss"] = value_loss[-1][1] if value_loss else None
             metrics["policy_loss"] = policy_loss[-1][1] if policy_loss else None
             metrics["combined_loss"] = combined_loss[-1][1] if combined_loss else None
-            metrics["replay_buffer_size"] = ray.get(self.replay_buffer.len.remote(), timeout=120)
+            metrics["replay_buffer_size"] = self.replay_buffer.len()
             metrics["learning_rate"] = self.scheduler.get_last_lr()[0]
             metrics["step_time"] = step_end - step_start
             metrics["loss_history"] = {
@@ -341,7 +342,7 @@ class AlphaZoo:
         for i, game in enumerate(self.games):
             game_index = i
             actor_list = [Gamer.remote(
-                self.replay_buffer,
+                self.record_queue,
                 self.network_storage,
                 game,
                 game_index,
@@ -403,6 +404,13 @@ class AlphaZoo:
         print("Cache avg hit ratio: " + format(avg_hit_ratio / max(num_games_per_type, 1), '.4') +
               " | avg len: " + format(avg_cache_len / max(num_games_per_type, 1), '.6'))
 
+        self._drain_record_queue()
+
+    def _drain_record_queue(self) -> None:
+        while not self.record_queue.empty():
+            record, game_index = self.record_queue.get(block=False)
+            self.replay_buffer.save_game_record(record, game_index)
+
     ##########################################################################
     # ---------------------------    TRAINING    --------------------------- #
     ##########################################################################
@@ -418,23 +426,23 @@ class AlphaZoo:
         batch_size: int,
     ) -> None:
         start = time.time()
+        self._drain_record_queue()
 
         recurrent_config = self.config.recurrent
         train_iterations = recurrent_config.train_iterations if recurrent_config is not None else 1
-        batch_extraction = self.config.learning.batch_extraction
 
-        replay_size: int = ray.get(self.replay_buffer.len.remote(), timeout=120)
-        n_games: int = ray.get(self.replay_buffer.played_games.remote(), timeout=120)
+        replay_size: int = self.replay_buffer.len()
+        n_games: int = self.replay_buffer.played_games()
 
         print("\nReplay buffer: " + str(replay_size) + " positions, " + str(n_games) + " games.")
 
         if learning_method == "epochs":
-            self.train_with_epochs(batch_extraction, batch_size, replay_size,
+            self.train_with_epochs(batch_size, replay_size,
                                    policy_loss_function, value_loss_function,
                                    normalize_policy, train_iterations, prog_alpha,
                                    use_progressive_loss)
         elif learning_method == "samples":
-            self.train_with_samples(batch_extraction, batch_size, replay_size,
+            self.train_with_samples(batch_size, replay_size,
                                     policy_loss_function, value_loss_function,
                                     normalize_policy, train_iterations, prog_alpha,
                                     use_progressive_loss)
@@ -446,7 +454,6 @@ class AlphaZoo:
 
     def train_with_epochs(
         self,
-        batch_extraction: str,
         batch_size: int,
         replay_size: int,
         policy_loss_function: LossFunction,
@@ -473,25 +480,17 @@ class AlphaZoo:
         epoch_losses: list[tuple[int, float, float, float]] = []
 
         for e in range(learning_epochs):
-            ray.get(self.replay_buffer.shuffle.remote(), timeout=120)
-            if batch_extraction == 'local':
-                future_replay_buffer = self.replay_buffer.get_buffer.remote()
+            self.replay_buffer.shuffle()
 
             epoch_value_loss = 0.0
             epoch_policy_loss = 0.0
             epoch_combined_loss = 0.0
 
-            if batch_extraction == 'local':
-                replay_buffer = ray.get(future_replay_buffer, timeout=300)
-
             for b in range(number_of_batches):
                 start_index = b * batch_size
                 next_index = (b + 1) * batch_size
 
-                if batch_extraction == 'local':
-                    batch = replay_buffer[start_index:next_index]
-                else:
-                    batch = ray.get(self.replay_buffer.get_slice.remote(start_index, next_index))
+                batch = self.replay_buffer.get_slice(start_index, next_index)
 
                 value_loss, policy_loss, combined_loss = self.batch_update_weights(
                     batch, policy_loss_function, value_loss_function,
@@ -516,7 +515,6 @@ class AlphaZoo:
 
     def train_with_samples(
         self,
-        batch_extraction: str,
         batch_size: int,
         replay_size: int,
         policy_loss_function: LossFunction,
@@ -529,9 +527,6 @@ class AlphaZoo:
         num_samples = self.config.learning.samples.num_samples
         late_heavy = self.config.learning.samples.late_heavy
         replace = self.config.learning.samples.with_replacement
-
-        if batch_extraction == 'local':
-            future_buffer = self.replay_buffer.get_buffer.remote()
 
         probs: list[float] = []
         if late_heavy:
@@ -553,20 +548,9 @@ class AlphaZoo:
         average_combined_loss = 0.0
 
         print("Total updates: " + str(num_samples))
-        if batch_extraction == 'local':
-            replay_buffer = ray.get(future_buffer, timeout=300)
 
         for _ in range(num_samples):
-            if batch_extraction == 'local':
-                if len(probs) == 0:
-                    choice_args: list[Any] = [len(replay_buffer), batch_size, replace]
-                else:
-                    choice_args = [len(replay_buffer), batch_size, replace, probs]
-
-                batch_indexes = np.random.choice(*choice_args)
-                batch = [replay_buffer[i] for i in batch_indexes]
-            else:
-                batch = ray.get(self.replay_buffer.get_sample.remote(batch_size, replace, probs))
+            batch = self.replay_buffer.get_sample(batch_size, replace, probs)
 
             value_loss, policy_loss, combined_loss = self.batch_update_weights(
                 batch, policy_loss_function, value_loss_function,
@@ -760,7 +744,7 @@ class AlphaZoo:
         return self.scheduler.state_dict()
 
     def get_replay_buffer_state(self) -> dict:
-        return ray.get(self.replay_buffer.get_state.remote())
+        return self.replay_buffer.get_state()
 
     def wait_for_delay(self, delay_period: int) -> None:
         divisions = 10

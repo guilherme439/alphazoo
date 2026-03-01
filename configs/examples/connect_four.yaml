@@ -23,7 +23,6 @@ cache:
 learning:
   player_dependent_value: true
   replay_window_size: 10000
-  batch_extraction: "local"            # "local" or "distributed"
   learning_method: "samples"           # "samples" or "epochs"
   value_loss: "SE"                     # "SE" (squared error) or "AE" (absolute error)
   policy_loss: "CEL"                   # "CEL" (cross-entropy), "KLD" (KL divergence), or "MSE" (Mean squared error)

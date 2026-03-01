@@ -115,7 +115,6 @@ AlphaZooConfig
 ├── learning: LearningConfig
 │   ├── player_dependent_value  see "Value Perspective" below
 │   ├── replay_window_size
-│   ├── batch_extraction    "local" | "distributed"
 │   ├── learning_method     "samples" | "epochs"
 │   ├── value_loss          "SE" | "AE"
 │   ├── policy_loss         "CEL" | "KLD" | "MSE"
