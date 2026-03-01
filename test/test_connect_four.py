@@ -57,7 +57,7 @@ def test_connect_four_training() -> None:
             early_random_exploration=0.0,
             sequential=SequentialConfig(num_games_per_type_per_step=2),
         ),
-        cache=CacheConfig(cache_choice="disabled", max_size=1000, keep_updated=False),
+        cache=CacheConfig(enabled=False),
         learning=LearningConfig(
             shared_storage_size=3,
             replay_window_size=500,

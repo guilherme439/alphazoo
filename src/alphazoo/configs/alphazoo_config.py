@@ -17,6 +17,13 @@ class AsynchronousConfig:
 
 
 @dataclass
+class CacheConfig:
+    enabled: bool = True
+    max_size: int = 8000
+    keep_updated: bool = True
+
+
+@dataclass
 class RunningConfig:
     running_mode: Literal["sequential", "asynchronous"] = "sequential"
     num_actors: int = 3
@@ -27,13 +34,6 @@ class RunningConfig:
     training_steps: int = 1000
     sequential: SequentialConfig = field(default_factory=SequentialConfig)
     asynchronous: AsynchronousConfig = field(default_factory=AsynchronousConfig)
-
-
-@dataclass
-class CacheConfig:
-    cache_choice: Literal["keyless", "dict", "disabled"] = "keyless"
-    max_size: int = 8000
-    keep_updated: bool = True
 
 
 @dataclass

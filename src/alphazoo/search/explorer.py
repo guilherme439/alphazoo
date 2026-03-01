@@ -9,7 +9,7 @@ from scipy.special import softmax
 
 from .node import Node
 from ..networks.network_manager import NetworkManager
-from ..utils.caches.cache import Cache
+from ..utils.caches.keyless_cache import KeylessCache
 from ..configs.search_config import SearchConfig
 
 '''
@@ -47,7 +47,7 @@ class Explorer:
         network: NetworkManager,
         root_node: Node,
         recurrent_iterations: int = 1,
-        cache: Cache | None = None,
+        cache: KeylessCache | None = None,
     ) -> tuple[int, Node, float]:
         self.network = network
         self.recurrent_iterations = recurrent_iterations
@@ -142,7 +142,7 @@ class Explorer:
             node.visit_count += 1
             node.value_sum += value
 
-    def evaluate(self, node: Node, game: Any, cache: Cache | None) -> float:
+    def evaluate(self, node: Node, game: Any, cache: KeylessCache | None) -> float:
         node.to_play = game.get_current_player()
 
         if game.is_terminal():

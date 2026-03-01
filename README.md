@@ -1,18 +1,56 @@
 # AlphaZoo
 
-Standalone AlphaZero implementation with [PettingZoo](https://github.com/Farama-Foundation/PettingZoo) compatibility.
+Modest Standalone AlphaZero implementation for any game (1 or 2 player) with native support for [PettingZoo](https://github.com/Farama-Foundation/PettingZoo) environments.
+
+
+## Features
+
+### Standard AlphaZero
+
+<table>
+<tr>
+<td>✅</td>
+<td>Works with **any game** and **any network**.</td>
+</tr>
+<tr>
+<td>✅</td>
+<td>Can run **sequentially** or fully **asynchronously** (uses <a href="https://github.com/ray-project/ray">Ray</a> under the hood).</td>
+</tr>
+</table>
+
+### Beyond AlphaZero
+
+<table>
+<tr>
+<td>✅</td>
+<td>Highly optimized **inference cache**.</td>
+</tr>
+<tr>
+<td>✅</td>
+<td>Support for <a href="https://github.com/aks2203/deep-thinking">DeepThinking</a> networks and progressive loss.</td>
+</tr>
+
+<tr>
+<td>✅</td>
+<td>Supports different **value perspectives** (player-dependent, like the original AlphaZero, or _static_).</td>
+</tr>
+<tr>
+<td>✅</td>
+<td>Allows different **data sampling** methods (weighted sampling, multiple epochs, etc.) and multiple **loss functions** (KL divergence, cross-entropy, absolute error, etc.).</td>
+</tr>
+</table>
+
+
 
 ## Getting Started
 
 - [Installation](docs/install.md)
 
-## Usage
+## Basic Usage
 
 AlphaZoo works with any PettingZoo AEC environment. Pass the env, a network, and a config — then call `train()`.
 
-### Standard network
-
-Subclass `AlphaZooNet` and implement `forward(x) -> (policy_logits, value_estimate)`.
+`AlphaZooNet` is the simplest network interface that alphazoo accepts. It is simply a nn.Module that implements `forward(x) -> (policy_logits, value_estimate)`.
 
 ```python
 import torch
@@ -53,7 +91,7 @@ trainer = AlphaZoo(
 trainer.train()
 ```
 
-Use `on_step_end` to hook into the training loop for checkpointing or logging:
+Alphazoo has a `on_step_end` callback that can be used to hook into the training loop for checkpointing or logging:
 
 ```python
 def on_step_end(az, step, metrics):
@@ -62,21 +100,9 @@ def on_step_end(az, step, metrics):
 trainer.train(on_step_end=on_step_end)
 ```
 
-## Customization
+## Advanced Usage
 
-`IAlphazooGame` is the abstract game interface that AlphaZoo expects (it lists all the methods that must be implemented).
-
-`PettingZooWrapper` is the standard implementation for PettingZoo AEC environments — it assumes "standard" PettingZoo behavior.
-
-If your environment does not work exactly as `alphazoo` expects, you can override specific methods from the wrapper or implement `IAlphazooGame` from scratch.
-
-```python
-class MyPettingZooWrapper(PettingZooWrapper):
-    def obs_to_state(self, obs, agent_id):
-        # channels-last → channels-first
-        t = torch.tensor(obs["observation"], dtype=torch.float32).unsqueeze(0)
-        return t.permute(0, 3, 1, 2)
-```
+You can find explanations for more advanced use cases in the [documentation](docs/details.md)
 
 ----
 

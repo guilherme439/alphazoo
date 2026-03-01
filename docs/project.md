@@ -60,7 +60,6 @@ Ray actors for parallelism:
 
 Optional tensor caching to avoid redundant network evaluations during MCTS:
 - `KeylessCache`: direct-mapped with blake2b hashing, no key storage
-- `DictCache`: dictionary-based with eviction
 
 ### Configuration (`configs/`)
 
@@ -68,11 +67,11 @@ Dataclass hierarchy with defaults:
 ```
 AlphaZooConfig
 ├── RunningConfig (sequential vs async, num actors, training steps)
-├── CacheConfig (cache type, max size)
+├── CacheConfig (enabled, max size, keep_updated)
 ├── RecurrentConfig | None  (required when using AlphaZooRecurrentNet)
 │   ├── train_iterations, pred_iterations, test_iterations
 │   ├── use_progressive_loss: bool  (whether to use progressive loss)
-│   └── alpha: float  (progressive loss blend weight, used when use_progressive_loss=True)
+│   └── prog_alpha: float  (progressive loss blend weight, used when use_progressive_loss=True)
 ├── LearningConfig (buffer size, batch extraction, loss functions)
 │   ├── player_dependent_value (bool, default True — see Value Perspective below)
 │   ├── SamplesConfig / EpochsConfig
@@ -96,11 +95,11 @@ Controls how the network's value output is interpreted relative to players.
 
 **`AlphaZooNet`** and **`AlphaZooRecurrentNet`** are abstract base classes (ABCs) that define the two network interfaces AlphaZoo accepts. Users subclass one of these instead of `nn.Module` directly. Internal architecture is unconstrained — e.g., separate actor and critic heads with no shared trunk are valid.
 
-**`NetworkManager`** wraps either ABC with device management (CPU/GPU switching for inference vs training). Exposes a single `inference()` method:
-- For `AlphaZooNet`: returns `(policy_logits, value_estimate)`.
-- For `AlphaZooRecurrentNet`: returns `((policy_logits, value_estimate), interim_thought)`.
+**`NetworkManager`** wraps either ABC with device management (CPU/GPU switching for inference vs training). Exposes two inference methods:
+- `inference(state, training)`: for `AlphaZooNet`, returns `(policy_logits, value_estimate)`.
+- `recurrent_inference(state, training, iters_to_do, interim_thought)`: for `AlphaZooRecurrentNet`, returns `((policy_logits, value_estimate), interim_thought)`.
 
-Use `is_recurrent_network(network_manager)` (from `utils/functions/general_utils.py`) to branch on network type at call sites.
+Use `network_manager.is_recurrent()` to branch on network type at call sites.
 
 ## Key Dependencies
 

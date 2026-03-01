@@ -1,8 +1,6 @@
 import torch
 from torch.optim import Adam, SGD, Optimizer
 
-from ..caches.cache import Cache
-from ..caches.dict_cache import DictCache
 from ..caches.keyless_cache import KeylessCache
 
 
@@ -13,15 +11,8 @@ def initialize_parameters(model: torch.nn.Module) -> None:
             torch.nn.init.xavier_uniform_(param)
 
 
-def create_cache(cache_choice: str, max_size: int) -> Cache | None:
-    if cache_choice == "dict":
-        return DictCache(max_size)
-    elif cache_choice == "keyless":
-        return KeylessCache(max_size)
-    elif cache_choice == "disabled":
-        return None
-    else:
-        raise ValueError(f"Invalid cache_choice: {cache_choice}")
+def create_cache(max_size: int) -> KeylessCache:
+    return KeylessCache(max_size)
 
 
 def create_optimizer(

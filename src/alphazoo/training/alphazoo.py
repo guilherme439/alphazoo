@@ -19,7 +19,7 @@ from torch.optim.lr_scheduler import MultiStepLR
 from ..configs.alphazoo_config import AlphaZooConfig
 from ..networks.interfaces import AlphaZooNet, AlphaZooRecurrentNet
 from ..networks.network_manager import NetworkManager
-from ..utils.caches.cache import Cache
+from ..utils.caches.keyless_cache import KeylessCache
 from ..utils.functions.general_utils import create_optimizer
 from ..utils.functions.loss_functions import (AbsoluteError, KLDivergence,
                                               MSError, SquaredError)
@@ -111,7 +111,7 @@ class AlphaZoo:
         elif running_mode == "sequential":
             num_games_per_type_per_step = config.running.sequential.num_games_per_type_per_step
 
-        cache_choice = config.cache.cache_choice
+        cache_enabled = config.cache.enabled
         cache_max = config.cache.max_size
         keep_updated = config.cache.keep_updated
 
@@ -194,7 +194,7 @@ class AlphaZoo:
         if early_fill_games_per_type > 0:
             total_early_fill = early_fill_games_per_type * self.num_game_types
             print("-Playing " + str(total_early_fill) + " initial games to fill the replay buffer.")
-        if cache_choice != "disabled":
+        if cache_enabled:
             print("-Using cache for inference results.")
         if self.starting_step != 0:
             print("-Starting from iteration " + str(self.starting_step + 1) + ".\n")
@@ -204,11 +204,11 @@ class AlphaZoo:
         if early_fill_games_per_type > 0:
             print("\n\n\n\nEarly Buffer Fill\n")
             self.run_selfplay(
-                early_fill_games_per_type, 
-                cache_choice, 
-                keep_updated, 
-                cache_max=cache_max, 
-                text="Playing initial games", 
+                early_fill_games_per_type,
+                cache_enabled,
+                keep_updated,
+                cache_max=cache_max,
+                text="Playing initial games",
                 early_fill=True
             )
 
@@ -222,7 +222,7 @@ class AlphaZoo:
                 0,
                 self.config.search,
                 pred_iterations,
-                cache_choice,
+                cache_enabled,
                 cache_max,
                 self.config.learning.player_dependent_value,
             ) for _ in range(num_actors)]
@@ -245,11 +245,11 @@ class AlphaZoo:
             step_start = time.time()
             if running_mode == "sequential":
                 self.run_selfplay(
-                    num_games_per_type_per_step, 
-                    cache_choice, 
-                    keep_updated, 
-                    cache_max=cache_max, 
-                    text="Self-Play Games", 
+                    num_games_per_type_per_step,
+                    cache_enabled,
+                    keep_updated,
+                    cache_max=cache_max,
+                    text="Self-Play Games",
                     metrics=metrics
                 )
 
@@ -316,9 +316,9 @@ class AlphaZoo:
     def run_selfplay(
         self,
         num_games_per_type: int,
-        cache_choice: str,
+        cache_enabled: bool,
         keep_updated: bool,
-        cache_max: int = 10000,
+        cache_max: int = 8000,
         text: str = "Self-Play",
         early_fill: bool = False,
         metrics: dict[str, Any] | None = None,
@@ -347,7 +347,7 @@ class AlphaZoo:
                 game_index,
                 search_config,
                 pred_iterations,
-                cache_choice,
+                cache_enabled,
                 cache_max,
                 self.config.learning.player_dependent_value,
             ) for _ in range(num_actors)]
@@ -364,7 +364,7 @@ class AlphaZoo:
             games_requested = first_requests
             avg_hit_ratio: float = 0
             avg_cache_len: float = 0
-            latest_cache: Cache | None = None
+            latest_cache: KeylessCache | None = None
             while games_played < num_games_per_type:
 
                 stats, cache = actor_pool.get_next_unordered()
@@ -374,7 +374,7 @@ class AlphaZoo:
                     avg_cache_len += cache.length()
                 games_played += 1
 
-                if keep_updated and (cache_choice != "disabled"):
+                if keep_updated and cache_enabled:
                     if first:
                         latest_cache = cache
                         first = False
@@ -384,7 +384,7 @@ class AlphaZoo:
                             latest_cache.update(cache)
 
                 if games_requested < num_games_per_type:
-                    if keep_updated and (cache_choice != "disabled"):
+                    if keep_updated and cache_enabled:
                         call_args = [latest_cache]
                     else:
                         call_args = []

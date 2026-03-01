@@ -10,7 +10,7 @@ import numpy as np
 from ..search.node import Node
 from ..search.explorer import Explorer
 from ..networks.network_manager import NetworkManager
-from ..utils.caches.cache import Cache
+from ..utils.caches.keyless_cache import KeylessCache
 from ..configs.search_config import SearchConfig
 from .game_record import GameRecord
 
@@ -28,8 +28,8 @@ class Gamer:
         game_index: int,
         search_config: SearchConfig,
         recurrent_iterations: int,
-        cache_choice: str,
-        size_estimate: int = 10000,
+        cache_enabled: bool,
+        cache_max_size: int = 8000,
         player_dependent_value: bool = True,
     ) -> None:
         self.buffer = buffer
@@ -39,15 +39,15 @@ class Gamer:
 
         self.search_config = search_config
         self.recurrent_iterations = recurrent_iterations
-        self.cache_choice = cache_choice
-        self.size_estimate = size_estimate
+        self.cache_enabled = cache_enabled
+        self.cache_max_size = cache_max_size
         self.player_dependent_value = player_dependent_value
 
         self.explorer = Explorer(search_config, True, player_dependent_value)
 
         self.time_to_stop = False
 
-    def play_game(self, cache: Cache | None = None) -> tuple[dict[str, float], Cache | None]:
+    def play_game(self, cache: KeylessCache | None = None) -> tuple[dict[str, float], KeylessCache | None]:
         future_network = self.shared_storage.get.remote() # ask for a copy of the latest network
 
         stats: dict[str, float] = {
@@ -64,8 +64,8 @@ class Gamer:
         num_actions = game.get_num_actions()
         keep_subtree: bool = self.search_config.simulation.keep_subtree
 
-        if cache is None:
-            cache = create_cache(self.cache_choice, self.size_estimate)
+        if cache is None and self.cache_enabled:
+            cache = create_cache(self.cache_max_size)
 
         root_node = Node(0)
         record = GameRecord(num_actions, self.player_dependent_value)
