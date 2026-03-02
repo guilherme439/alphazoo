@@ -6,6 +6,7 @@ __version__ = "0.1.0"
 
 from .training.alphazoo import AlphaZoo
 from .training.gamer import Gamer
+from .training.gamer_group import GamerGroup
 from .training.replay_buffer import ReplayBuffer
 from .training.game_record import GameRecord
 
@@ -22,6 +23,7 @@ __all__ = [
     "__version__",
     "AlphaZoo",
     "Gamer",
+    "GamerGroup",
     "ReplayBuffer",
     "GameRecord",
     "Explorer",

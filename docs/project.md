@@ -22,7 +22,7 @@ The model must subclass either `AlphaZooNet` or `AlphaZooRecurrentNet` (both fro
 ### Training Orchestrator (`training/alphazoo.py`)
 
 `AlphaZoo` class manages the full training loop:
-1. **Self-play phase** (`run_selfplay`): Ray actors (`Gamer`) play games using MCTS, storing trajectories in a distributed `ReplayBuffer`
+1. **Self-play phase** (`run_selfplay`): Ray actors (`GamerGroup`) play games using MCTS with threaded workers, storing trajectories in a `ReplayBuffer`
 2. **Network training phase** (`train_network`): samples batches from replay buffer, computes policy + value loss, backprops
 3. **Model distribution**: updated weights pushed to `RemoteStorage` for actors to pull
 
@@ -52,7 +52,7 @@ Two execution modes:
 ### Distributed Architecture
 
 Ray actors for parallelism:
-- `Gamer` (`training/gamer.py`): self-play workers managed via `ActorPool`
+- `GamerGroup` (`training/gamer_group.py`): each group is a Ray actor running K worker threads that share one cache and one network copy. `Gamer` (`training/gamer.py`) is a plain class used per-thread.
 - `ReplayBuffer`: shared training data store
 - `RemoteStorage` (`utils/remote_storage.py`): model version storage (keeps last N versions)
 
@@ -66,8 +66,8 @@ Optional tensor caching to avoid redundant network evaluations during MCTS:
 Dataclass hierarchy with defaults:
 ```
 AlphaZooConfig
-├── RunningConfig (sequential vs async, num actors, training steps)
-├── CacheConfig (enabled, max size, keep_updated)
+├── RunningConfig (sequential vs async, num groups, workers per group, training steps)
+├── CacheConfig (enabled, max size)
 ├── RecurrentConfig | None  (required when using AlphaZooRecurrentNet)
 │   ├── train_iterations, pred_iterations, test_iterations
 │   ├── use_progressive_loss: bool  (whether to use progressive loss)

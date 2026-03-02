@@ -19,12 +19,11 @@ from torch.optim.lr_scheduler import MultiStepLR
 from ..configs.alphazoo_config import AlphaZooConfig
 from ..networks.interfaces import AlphaZooNet, AlphaZooRecurrentNet
 from ..networks.network_manager import NetworkManager
-from ..utils.caches.keyless_cache import KeylessCache
 from ..utils.functions.general_utils import create_optimizer
 from ..utils.functions.loss_functions import (AbsoluteError, KLDivergence,
                                               MSError, SquaredError)
 from ..utils.remote_storage import RemoteStorage
-from .gamer import Gamer
+from .gamer_group import GamerGroup
 from .replay_buffer import ReplayBuffer
 
 StepCallback = Callable[["AlphaZoo", int, dict[str, Any]], None]
@@ -97,7 +96,8 @@ class AlphaZoo:
         self.current_step = self.starting_step
 
         running_mode = config.running.running_mode
-        num_actors = config.running.num_actors
+        num_groups = config.running.num_groups
+        workers_per_group = config.running.workers_per_group
         early_fill_games_per_type = config.running.early_fill_per_type
         training_steps = int(config.running.training_steps)
         self.num_game_types = len(self.games)
@@ -113,7 +113,6 @@ class AlphaZoo:
 
         cache_enabled = config.cache.enabled
         cache_max = config.cache.max_size
-        keep_updated = config.cache.keep_updated
 
         storage_frequency = 1
 
@@ -207,28 +206,16 @@ class AlphaZoo:
             self.run_selfplay(
                 early_fill_games_per_type,
                 cache_enabled,
-                keep_updated,
                 cache_max=cache_max,
-                text="Playing initial games",
                 early_fill=True
             )
 
-        actor_list: list[Any] = []
-        termination_futures: list[Any] = []
-        if running_mode == "asynchronous":
-            actor_list = [Gamer.options(max_concurrency=2).remote(
-                self.record_queue,
-                self.network_storage,
-                self.games[0],
-                0,
-                self.config.search,
-                pred_iterations,
-                cache_enabled,
-                cache_max,
-                self.config.learning.player_dependent_value,
-            ) for _ in range(num_actors)]
-
-            termination_futures = [actor.play_forever.remote() for actor in actor_list]
+        # --- Async mode (deferred) ---
+        # actor_list: list[Any] = []
+        # termination_futures: list[Any] = []
+        # if running_mode == "asynchronous":
+        #     actor_list = [GamerGroup.remote(...) for _ in range(num_groups)]
+        #     termination_futures = [actor.play_forever.remote() for actor in actor_list]
 
         # ---- MAIN TRAINING LOOP ---- #
 
@@ -248,9 +235,7 @@ class AlphaZoo:
                 self.run_selfplay(
                     num_games_per_type_per_step,
                     cache_enabled,
-                    keep_updated,
                     cache_max=cache_max,
-                    text="Self-Play Games",
                     metrics=metrics
                 )
 
@@ -298,19 +283,14 @@ class AlphaZoo:
 
             self.clear_metrics(metrics)
 
-            print("-------------------------------------\n")
-            print("\nMain process memory usage: ")
-            print("Current memory usage: " +
-                   format(process.memory_info().rss / (1024 * 1000), '.6') + " MB")
-            print("Peak memory usage:    " +
-                   format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1000, '.6') + " MB\n")
             print("\n-------------------------------------\n\n")
 
-        if running_mode == "asynchronous":
-            print("Waiting for actors to finish their games\n")
-            for actor in actor_list:
-                actor.stop.remote()
-            ray.get(termination_futures)
+        # --- Async mode (deferred) ---
+        # if running_mode == "asynchronous":
+        #     print("Waiting for actors to finish their games\n")
+        #     for actor in actor_list:
+        #         actor.stop.remote()
+        #     ray.get(termination_futures)
 
         print("All done.\nExiting")
 
@@ -318,9 +298,7 @@ class AlphaZoo:
         self,
         num_games_per_type: int,
         cache_enabled: bool,
-        keep_updated: bool,
         cache_max: int = 8000,
-        text: str = "Self-Play",
         early_fill: bool = False,
         metrics: dict[str, Any] | None = None,
     ) -> None:
@@ -328,7 +306,8 @@ class AlphaZoo:
 
         recurrent_config = self.config.recurrent
         pred_iterations = recurrent_config.pred_iterations if recurrent_config is not None else 1
-        num_actors = self.config.running.num_actors
+        num_groups = self.config.running.num_groups
+        workers_per_group = self.config.running.workers_per_group
 
         search_config = deepcopy(self.config.search)
         if early_fill:
@@ -338,71 +317,91 @@ class AlphaZoo:
 
         total_games = self.num_game_types * num_games_per_type
         total_moves: int = 0
-        #print(text)
+        all_groups: list[Any] = []
+
+        profiling = os.environ.get("ALPHAZOO_PROFILE")
+        if profiling:
+            group_cls = GamerGroup.options(
+                runtime_env={"env_vars": {"ALPHAZOO_PROFILE": profiling}}
+            )
+        else:
+            group_cls = GamerGroup
+
         for i, game in enumerate(self.games):
-            game_index = i
-            actor_list = [Gamer.remote(
+            groups = [group_cls.remote(
                 self.record_queue,
                 self.network_storage,
                 game,
-                game_index,
+                i,
                 search_config,
                 pred_iterations,
+                workers_per_group,
                 cache_enabled,
                 cache_max,
                 self.config.learning.player_dependent_value,
-            ) for _ in range(num_actors)]
+            ) for _ in range(num_groups)]
 
-            actor_pool = ray.util.ActorPool(actor_list)
+            base = num_games_per_type // num_groups
+            remainder = num_games_per_type % num_groups
+            games_per_group = [base + (1 if g < remainder else 0) for g in range(num_groups)]
 
-            call_args: list[Any] = []
-            first_requests = min(num_actors, num_games_per_type)
-            for _ in range(first_requests):
-                actor_pool.submit(lambda actor, args: actor.play_game.remote(*args), call_args)
+            play_futures = [
+                group.play_games.remote(n)
+                for group, n in zip(groups, games_per_group)
+                if n > 0
+            ]
+            all_stats_lists = ray.get(play_futures)
 
-            first = True
-            games_played = 0
-            games_requested = first_requests
-            avg_hit_ratio: float = 0
-            avg_cache_len: float = 0
-            latest_cache: KeylessCache | None = None
-            while games_played < num_games_per_type:
+            for stats_list in all_stats_lists:
+                for stats in stats_list:
+                    total_moves += stats["number_of_moves"]
 
-                stats, cache = actor_pool.get_next_unordered()
-                total_moves += stats["number_of_moves"]
-                if cache is not None:
-                    avg_hit_ratio += cache.get_hit_ratio()
-                    avg_cache_len += cache.length()
-                games_played += 1
+            all_groups.extend(groups)
 
-                if keep_updated and cache_enabled:
-                    if first:
-                        latest_cache = cache
-                        first = False
-                    else:
-                        if ((latest_cache is not None) and
-                            (latest_cache.get_fill_ratio() < latest_cache.get_update_threshold())):
-                            latest_cache.update(cache)
+            if cache_enabled:
+                cache_futures = [group.get_cache_stats.remote() for group in groups]
+                cache_stats_list = ray.get(cache_futures)
+                avg_hit_ratio = sum(cs["hit_ratio"] for cs in cache_stats_list) / len(cache_stats_list)
+                avg_cache_len = sum(cs["length"] for cs in cache_stats_list) / len(cache_stats_list)
+            else:
+                avg_hit_ratio = 0.0
+                avg_cache_len = 0.0
 
-                if games_requested < num_games_per_type:
-                    if keep_updated and cache_enabled:
-                        call_args = [latest_cache]
-                    else:
-                        call_args = []
-                    actor_pool.submit(lambda actor, args: actor.play_game.remote(*args), call_args)
-                    games_requested += 1
+        if os.environ.get("ALPHAZOO_PROFILE"):
+            profile_futures = [group.get_profile_stats.remote() for group in all_groups]
+            profile_results = ray.get(profile_futures)
+            profile_bytes = [b for b in profile_results if b is not None]
+            if profile_bytes:
+                import pstats
+                import tempfile
+
+                os.makedirs("profiling", exist_ok=True)
+                tmp_paths = []
+                for raw in profile_bytes:
+                    tmp = tempfile.NamedTemporaryFile(suffix=".prof", delete=False)
+                    tmp.write(raw)
+                    tmp.close()
+                    tmp_paths.append(tmp.name)
+
+                merged = pstats.Stats(tmp_paths[0])
+                for p in tmp_paths[1:]:
+                    merged.add(p)
+                merged.dump_stats("profiling/actor_profile.prof")
+
+                for p in tmp_paths:
+                    os.unlink(p)
 
         end = time.time()
         total_time = end - start
         if metrics is not None:
             metrics["episode_len_mean"] = total_moves / total_games
-            
+
         print("Games: " + str(total_games) +
               " | Time(m): " + format(total_time / 60, '.4') +
               " | Avg per game(s): " + format(total_time / total_games, '.4'))
-        
-        print("Cache avg hit ratio: " + format(avg_hit_ratio / max(num_games_per_type, 1), '.4') +
-              " | avg len: " + format(avg_cache_len / max(num_games_per_type, 1), '.6'))
+
+        print("Cache avg hit ratio: " + format(avg_hit_ratio, '.4') +
+              " | avg len: " + format(avg_cache_len, '.6'))
 
         self._drain_record_queue()
 

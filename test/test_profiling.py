@@ -1,16 +1,15 @@
 import os
 
+import pytest
 import torch
 import torch.nn as nn
-
+import yappi
 from pettingzoo.classic import connect_four_v3
 
 from alphazoo.training.alphazoo import AlphaZoo
 from alphazoo.networks import AlphaZooNet
 from alphazoo.configs.alphazoo_config import AlphaZooConfig
 
-
-# --------------- Small Network --------------- #
 
 class ConnectFourNet(AlphaZooNet):
     def __init__(self) -> None:
@@ -34,11 +33,12 @@ class ConnectFourNet(AlphaZooNet):
         return policy, value
 
 
-# --------------- Test --------------- #
+@pytest.mark.profiling
+def test_profiling_connect_four() -> None:
+    os.environ["ALPHAZOO_PROFILE"] = "1"
 
-def test_connect_four_training() -> None:
     config_path = os.path.join(
-        os.path.dirname(__file__), "configs", "connect_four_test.yaml"
+        os.path.dirname(__file__), "configs", "connect_four_profiling.yaml"
     )
     config = AlphaZooConfig.from_yaml(config_path)
     model = ConnectFourNet()
@@ -49,4 +49,20 @@ def test_connect_four_training() -> None:
         model=model,
     )
 
+    yappi.set_clock_type("wall")
+    yappi.start()
+
     trainer.train()
+
+    yappi.stop()
+
+    os.makedirs("profiling", exist_ok=True)
+    yappi.get_func_stats().save("profiling/main_process.prof", type="pstat")
+
+    del os.environ["ALPHAZOO_PROFILE"]
+
+    print("\n\nProfiling complete.")
+    print("  Main process: profiling/main_process.prof")
+    print("  Actor stats:  profiling/actor_profile.prof")
+    print("\nView with: snakeviz profiling/main_process.prof")
+    print("           snakeviz profiling/actor_profile.prof")

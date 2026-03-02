@@ -1,3 +1,9 @@
+#
+
+profiling/*
+
+
+
 # IDE
 .vscode/
 .idea/

@@ -29,11 +29,6 @@ class Cache(ABC):
         ...
 
     @abstractmethod
-    def update(self, cache: Cache) -> None:
-        ''' Updates this cache with items from a cache of the same type '''
-        ...
-
-    @abstractmethod
     def clear(self) -> None:
         ''' Clears the cache '''
         ...
@@ -45,10 +40,6 @@ class Cache(ABC):
 
     @abstractmethod
     def get_fill_ratio(self) -> float:
-        ...
-
-    @abstractmethod
-    def get_update_threshold(self) -> float:
         ...
 
     @abstractmethod

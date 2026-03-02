@@ -5,6 +5,7 @@ import math
 from typing import Any, Callable
 
 import torch
+from readerwriterlock import rwlock
 
 from .cache import Cache
 
@@ -15,7 +16,7 @@ _MAX_INDEX_BITS = 512 - _FINGERPRINT_BITS  # blake2b max digest is 512 bits
 
 class KeylessCache(Cache):
     """
-    Direct-mapped cache that avoids storing keys.
+    Direct-mapped, thread-safe cache that avoids storing keys.
 
     Each tensor is hashed to exactly (index_bits + 128) bits using blake2b.
     The hash is split into:
@@ -25,9 +26,9 @@ class KeylessCache(Cache):
     The hash size grows with the table so the fingerprint is always exactly
     128 bits regardless of table size. When two tensors map to the same slot,
     the newer one evicts the older.
-    """
 
-    _UPDATE_THRESHOLD = 0.8
+    Thread safety is provided by per-slot read-write locks (RWLockFair).
+    """
 
     def __init__(self, max_size: int) -> None:
         if max_size <= 0:
@@ -55,6 +56,10 @@ class KeylessCache(Cache):
         self.misses = 0
         self.evictions = 0
 
+        self._rw_locks = [rwlock.RWLockFair() for _ in range(self.size)]
+        self._rlocks = [lk.gen_rlock() for lk in self._rw_locks]
+        self._wlocks = [lk.gen_wlock() for lk in self._rw_locks]
+
     def _hash_tensor(self, tensor: torch.Tensor) -> int:
         raw = hashlib.blake2b(tensor.numpy().tobytes(), digest_size=self._digest_bytes).digest()
         return int.from_bytes(raw, "little")
@@ -70,52 +75,54 @@ class KeylessCache(Cache):
         h = self._hash_tensor(key)
         index = self._extract_index(h)
         fingerprint = self._extract_fingerprint(h)
-        if self.occupied[index] and self.fingerprints[index] == fingerprint:
-            self.hits += 1
-            return self.values[index]
-        self.misses += 1
-        return None
+        with self._rlocks[index]:
+            if self.occupied[index] and self.fingerprints[index] == fingerprint:
+                self.hits += 1
+                return self.values[index]
+            self.misses += 1
+            return None
 
     def contains(self, key: torch.Tensor) -> bool:
         h = self._hash_tensor(key)
         index = self._extract_index(h)
         fingerprint = self._extract_fingerprint(h)
-        return self.occupied[index] and self.fingerprints[index] == fingerprint
+        with self._rlocks[index]:
+            return self.occupied[index] and self.fingerprints[index] == fingerprint
 
     def put(self, item: tuple[torch.Tensor, Any]) -> None:
         key, value = item
         h = self._hash_tensor(key)
         index = self._extract_index(h)
         fingerprint = self._extract_fingerprint(h)
-        if self.occupied[index]:
-            if self.fingerprints[index] != fingerprint:
-                self.evictions += 1
-        else:
-            self.num_items += 1
-            self.occupied[index] = True
-        self.fingerprints[index] = fingerprint
-        self.values[index] = value
+        with self._wlocks[index]:
+            if self.occupied[index]:
+                if self.fingerprints[index] != fingerprint:
+                    self.evictions += 1
+            else:
+                self.num_items += 1
+                self.occupied[index] = True
+            self.fingerprints[index] = fingerprint
+            self.values[index] = value
 
     def get_and_put_if_absent(self, key: torch.Tensor, producer: Callable[[], Any]) -> Any:
-        result = self.get(key)
-        if result is not None:
-            return result
-        value = producer()
-        self.put((key, value))
-        return value
-
-    def update(self, other: KeylessCache) -> None:
-        if not isinstance(other, KeylessCache) or other.size != self.size:
-            raise ValueError("Can only update from a KeylessCache of the same size.")
-        for i in range(self.size):
-            if other.occupied[i]:
-                if self.occupied[i] and self.fingerprints[i] != other.fingerprints[i]:
+        h = self._hash_tensor(key)
+        index = self._extract_index(h)
+        fingerprint = self._extract_fingerprint(h)
+        with self._wlocks[index]:
+            if self.occupied[index] and self.fingerprints[index] == fingerprint:
+                self.hits += 1
+                return self.values[index]
+            self.misses += 1
+            value = producer()
+            if self.occupied[index]:
+                if self.fingerprints[index] != fingerprint:
                     self.evictions += 1
-                elif not self.occupied[i]:
-                    self.num_items += 1
-                    self.occupied[i] = True
-                self.fingerprints[i] = other.fingerprints[i]
-                self.values[i] = other.values[i]
+            else:
+                self.num_items += 1
+                self.occupied[index] = True
+            self.fingerprints[index] = fingerprint
+            self.values[index] = value
+            return value
 
     def clear(self) -> None:
         self.occupied = [False] * self.size
@@ -131,9 +138,6 @@ class KeylessCache(Cache):
 
     def get_fill_ratio(self) -> float:
         return self.num_items / self.size
-
-    def get_update_threshold(self) -> float:
-        return self._UPDATE_THRESHOLD
 
     def get_hit_ratio(self) -> float:
         total = self.hits + self.misses

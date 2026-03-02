@@ -40,6 +40,7 @@ class Explorer:
         self.config = search_config
         self.training = training
         self.player_dependent_value = player_dependent_value
+        self.rng = np.random.default_rng()
 
     def run_mcts(
         self,
@@ -83,8 +84,8 @@ class Explorer:
             if game.get_length() < self.config.exploration.number_of_softmax_moves:
                 action_i = self.softmax_action(visit_counts)
             else:
-                epsilon_softmax = np.random.random()
-                epsilon_random = np.random.random()
+                epsilon_softmax = self.rng.random()
+                epsilon_random = self.rng.random()
                 softmax_threshold: float = self.config.exploration.epsilon_softmax_exploration
                 random_threshold: float = self.config.exploration.epsilon_random_exploration
 
@@ -95,7 +96,7 @@ class Explorer:
                     valid_actions_mask = game.action_mask(obs).flatten()
                     n_valids = np.sum(valid_actions_mask)
                     probs = valid_actions_mask / n_valids
-                    action_i = int(np.random.choice(game.get_num_actions(), p=probs))
+                    action_i = int(self.rng.choice(game.get_num_actions(), p=probs))
                 else:
                     action_i = self.max_action(visit_counts)
         else:
@@ -204,7 +205,7 @@ class Explorer:
 
         probs = np.asarray(final_counts, dtype=np.float64).astype('float64')
         probs /= np.sum(probs) # re-normalize to improve precison
-        return int(np.random.choice(actions, p=probs))
+        return int(self.rng.choice(actions, p=probs))
 
     def add_exploration_noise(self, node: Node) -> None:
         dist_choice = self.config.exploration.root_exploration_distribution
@@ -213,7 +214,7 @@ class Explorer:
         beta: float = self.config.exploration.root_dist_beta
 
         actions = node.children.keys()
-        noise = np.random.gamma(alpha, beta, len(actions)) # Currently only gamma is supported
+        noise = self.rng.gamma(alpha, beta, len(actions))
         for a, n in zip(actions, noise):
             node.children[a].prior = node.children[a].prior * (1 - frac) + n * frac
 

@@ -15,7 +15,7 @@ from alphazoo.search.node import Node
 from alphazoo.search.explorer import Explorer
 from alphazoo.configs import SearchConfig
 from alphazoo.networks import AlphaZooNet, NetworkManager
-from .helpers import make_pettingzoo_game
+from .utils.helpers import make_pettingzoo_game
 
 
 class ConnectFourNet(AlphaZooNet):

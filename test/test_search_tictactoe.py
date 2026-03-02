@@ -16,7 +16,7 @@ from alphazoo.search.explorer import Explorer
 from alphazoo.configs import SearchConfig
 from alphazoo.configs.search_config import SimulationConfig, UCTConfig, ExplorationConfig
 from alphazoo.networks import AlphaZooNet, NetworkManager
-from .helpers import make_pettingzoo_game
+from .utils.helpers import make_pettingzoo_game
 
 
 class TicTacToeNet(AlphaZooNet):

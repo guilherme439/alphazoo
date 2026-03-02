@@ -1,9 +1,42 @@
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, Union, get_args, get_origin, get_type_hints
+
+import yaml
 
 from .search_config import SearchConfig
+
+
+def _resolve_dataclass_type(tp: type) -> type | None:
+    if dataclasses.is_dataclass(tp):
+        return tp
+    if get_origin(tp) is Union:
+        for arg in get_args(tp):
+            if arg is not type(None) and dataclasses.is_dataclass(arg):
+                return arg
+    return None
+
+
+def _dataclass_from_dict(cls: type, data: dict) -> object:
+    if data is None:
+        return cls()
+
+    hints = get_type_hints(cls)
+    kwargs = {}
+
+    for f in dataclasses.fields(cls):
+        if f.name not in data:
+            continue
+        value = data[f.name]
+        target = _resolve_dataclass_type(hints[f.name])
+        if isinstance(value, dict) and target is not None:
+            kwargs[f.name] = _dataclass_from_dict(target, value)
+        else:
+            kwargs[f.name] = value
+
+    return cls(**kwargs)
 
 
 @dataclass
@@ -20,13 +53,13 @@ class AsynchronousConfig:
 class CacheConfig:
     enabled: bool = True
     max_size: int = 8000
-    keep_updated: bool = True
 
 
 @dataclass
 class RunningConfig:
     running_mode: Literal["sequential", "asynchronous"] = "sequential"
-    num_actors: int = 3
+    num_groups: int = 1
+    workers_per_group: int = 4
     early_fill_per_type: int = 0
     early_softmax_moves: int = 12
     early_softmax_exploration: float = 0.5
@@ -101,3 +134,9 @@ class AlphaZooConfig:
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
+
+    @classmethod
+    def from_yaml(cls, path: str) -> AlphaZooConfig:
+        with open(path, "r") as f:
+            data = yaml.safe_load(f)
+        return _dataclass_from_dict(cls, data)  # type: ignore[return-value]

@@ -96,7 +96,8 @@ A full annotated example is available at [`configs/examples/connect_four.yaml`](
 AlphaZooConfig
 ├── running: RunningConfig
 │   ├── running_mode        "sequential" | "asynchronous"
-│   ├── num_actors          number of Ray self-play workers
+│   ├── num_groups          number of Ray GamerGroup actors
+│   ├── workers_per_group   worker threads per group (share cache & network)
 │   ├── training_steps      total training steps
 │   ├── early_fill_per_type games to play before training starts
 │   ├── sequential: SequentialConfig
@@ -105,8 +106,7 @@ AlphaZooConfig
 │       └── update_delay    seconds between training steps
 ├── cache: CacheConfig
 │   ├── enabled             enable/disable MCTS inference cache
-│   ├── max_size            max cached positions (rounded to power of 2)
-│   └── keep_updated        share cache across games within a step
+│   └── max_size            max cached positions (rounded to power of 2)
 ├── recurrent: RecurrentConfig | None
 │   ├── train_iterations    recurrent steps during weight updates
 │   ├── pred_iterations     recurrent steps during self-play

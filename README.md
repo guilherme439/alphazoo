@@ -52,7 +52,8 @@ class MyNet(AlphaZooNet):
 config = AlphaZooConfig(
     running=RunningConfig(
         running_mode="sequential",
-        num_actors=4,
+        num_groups=2,
+        workers_per_group=4,
         training_steps=500,
         sequential=SequentialConfig(num_games_per_type_per_step=12),
     ),

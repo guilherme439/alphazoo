@@ -2,9 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import ray
 import torch
-
 import numpy as np
 
 from ..search.node import Node
@@ -14,42 +12,27 @@ from ..utils.caches.keyless_cache import KeylessCache
 from ..configs.search_config import SearchConfig
 from .game_record import GameRecord
 
-from ..utils.functions.general_utils import create_cache
 
-
-@ray.remote(scheduling_strategy="SPREAD")
 class Gamer:
 
     def __init__(
         self,
-        record_queue: Any,
-        shared_storage: Any,
         game: Any,
         game_index: int,
         search_config: SearchConfig,
         recurrent_iterations: int,
-        cache_enabled: bool,
-        cache_max_size: int = 8000,
         player_dependent_value: bool = True,
     ) -> None:
-        self.record_queue = record_queue
-        self.shared_storage = shared_storage
         self.game = game
         self.game_index = game_index
 
         self.search_config = search_config
         self.recurrent_iterations = recurrent_iterations
-        self.cache_enabled = cache_enabled
-        self.cache_max_size = cache_max_size
         self.player_dependent_value = player_dependent_value
 
         self.explorer = Explorer(search_config, True, player_dependent_value)
 
-        self.time_to_stop = False
-
-    def play_game(self, cache: KeylessCache | None = None) -> tuple[dict[str, float], KeylessCache | None]:
-        future_network = self.shared_storage.get.remote() # ask for a copy of the latest network
-
+    def play_game(self, network: NetworkManager, cache: KeylessCache | None = None) -> tuple[dict[str, float], GameRecord]:
         stats: dict[str, float] = {
             "number_of_moves": 0,
             "average_children": 0,
@@ -64,14 +47,8 @@ class Gamer:
         num_actions = game.get_num_actions()
         keep_subtree: bool = self.search_config.simulation.keep_subtree
 
-        if cache is None and self.cache_enabled:
-            cache = create_cache(self.cache_max_size)
-
         root_node = Node(0)
         record = GameRecord(num_actions, self.player_dependent_value)
-
-        network_copy: NetworkManager = ray.get(future_network, timeout=200)
-        network_copy.check_devices() # Switch to gpu if available
 
         move_count = 0
         while not game.is_terminal():
@@ -80,7 +57,7 @@ class Gamer:
             record.add_step(state, game.get_current_player())
 
             action_i, chosen_child, root_bias = self.explorer.run_mcts(
-                game, network_copy, root_node, self.recurrent_iterations, cache,
+                game, network, root_node, self.recurrent_iterations, cache,
             )
 
             tree_size = root_node.get_visit_count()
@@ -111,12 +88,12 @@ class Gamer:
             terminal_value = -terminal_value
         record.set_terminal_value(terminal_value)
 
-        self.record_queue.put((record, self.game_index))
-        return stats, cache
+        return stats, record
 
-    def play_forever(self) -> None:
-        while not self.time_to_stop:
-            self.play_game()
-
-    def stop(self) -> None:
-        self.time_to_stop = True
+    # --- Async mode (deferred) ---
+    # def play_forever(self) -> None:
+    #     while not self.time_to_stop:
+    #         self.play_game(...)
+    #
+    # def stop(self) -> None:
+    #     self.time_to_stop = True

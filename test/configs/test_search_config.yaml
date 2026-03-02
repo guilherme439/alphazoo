@@ -1,12 +1,12 @@
-Simulation:
+simulation:
   mcts_simulations: 8
   keep_subtree: false
 
-UCT:
+uct:
   pb_c_base: 10000
   pb_c_init: 1.15
 
-Exploration:
+exploration:
   number_of_softmax_moves: 5
   epsilon_softmax_exploration: 0.04
   epsilon_random_exploration: 0.003

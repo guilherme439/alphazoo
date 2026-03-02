@@ -41,9 +41,9 @@ class SearchConfig:
         with open(path, "r") as f:
             data = yaml.safe_load(f)
 
-        simulation = SimulationConfig(**data.get("Simulation", {}))
-        uct = UCTConfig(**data.get("UCT", {}))
-        exploration = ExplorationConfig(**data.get("Exploration", {}))
+        simulation = SimulationConfig(**data.get("simulation", {}))
+        uct = UCTConfig(**data.get("uct", {}))
+        exploration = ExplorationConfig(**data.get("exploration", {}))
 
         return cls(simulation=simulation, uct=uct, exploration=exploration)
 
@@ -51,22 +51,22 @@ class SearchConfig:
     def from_dict(cls, config_dict: dict[str, dict]) -> SearchConfig:
         if isinstance(config_dict, dict):
             simulation = SimulationConfig(
-                mcts_simulations=config_dict["Simulation"]["mcts_simulations"],
-                keep_subtree=config_dict["Simulation"]["keep_subtree"],
+                mcts_simulations=config_dict["simulation"]["mcts_simulations"],
+                keep_subtree=config_dict["simulation"]["keep_subtree"],
             )
             uct = UCTConfig(
-                pb_c_base=config_dict["UCT"]["pb_c_base"],
-                pb_c_init=config_dict["UCT"]["pb_c_init"],
+                pb_c_base=config_dict["uct"]["pb_c_base"],
+                pb_c_init=config_dict["uct"]["pb_c_init"],
             )
             exploration = ExplorationConfig(
-                number_of_softmax_moves=config_dict["Exploration"]["number_of_softmax_moves"],
-                epsilon_softmax_exploration=config_dict["Exploration"]["epsilon_softmax_exploration"],
-                epsilon_random_exploration=config_dict["Exploration"]["epsilon_random_exploration"],
-                value_factor=config_dict["Exploration"]["value_factor"],
-                root_exploration_distribution=config_dict["Exploration"]["root_exploration_distribution"],
-                root_exploration_fraction=config_dict["Exploration"]["root_exploration_fraction"],
-                root_dist_alpha=config_dict["Exploration"]["root_dist_alpha"],
-                root_dist_beta=config_dict["Exploration"]["root_dist_beta"],
+                number_of_softmax_moves=config_dict["exploration"]["number_of_softmax_moves"],
+                epsilon_softmax_exploration=config_dict["exploration"]["epsilon_softmax_exploration"],
+                epsilon_random_exploration=config_dict["exploration"]["epsilon_random_exploration"],
+                value_factor=config_dict["exploration"]["value_factor"],
+                root_exploration_distribution=config_dict["exploration"]["root_exploration_distribution"],
+                root_exploration_fraction=config_dict["exploration"]["root_exploration_fraction"],
+                root_dist_alpha=config_dict["exploration"]["root_dist_alpha"],
+                root_dist_beta=config_dict["exploration"]["root_dist_beta"],
             )
             return cls(simulation=simulation, uct=uct, exploration=exploration)
         return config_dict  # type: ignore[return-value]
