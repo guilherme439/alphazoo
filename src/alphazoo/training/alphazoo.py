@@ -403,8 +403,6 @@ class AlphaZoo:
         print("Cache avg hit ratio: " + format(avg_hit_ratio, '.4') +
               " | avg len: " + format(avg_cache_len, '.6'))
 
-        self._drain_record_queue()
-
     def _drain_record_queue(self) -> None:
         while not self.record_queue.empty():
             record, game_index = self.record_queue.get(block=False)

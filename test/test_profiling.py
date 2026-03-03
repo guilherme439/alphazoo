@@ -6,10 +6,11 @@ import torch.nn as nn
 import yappi
 from pettingzoo.classic import connect_four_v3
 
-from alphazoo.training.alphazoo import AlphaZoo
-from alphazoo.networks import AlphaZooNet
 from alphazoo.configs.alphazoo_config import AlphaZooConfig
+from alphazoo.networks import AlphaZooNet
+from alphazoo.training.alphazoo import AlphaZoo
 
+# python -m pytest test/test_profiling.py -m profiling -s 2>/dev/null
 
 class ConnectFourNet(AlphaZooNet):
     def __init__(self) -> None:
@@ -36,6 +37,7 @@ class ConnectFourNet(AlphaZooNet):
 @pytest.mark.profiling
 def test_profiling_connect_four() -> None:
     os.environ["ALPHAZOO_PROFILE"] = "1"
+    os.environ["RAY_DEDUP_LOGS"] = "0"
 
     config_path = os.path.join(
         os.path.dirname(__file__), "configs", "connect_four_profiling.yaml"

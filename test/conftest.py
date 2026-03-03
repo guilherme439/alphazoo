@@ -1,11 +1,15 @@
 import os
-import ray
+
 import pytest
+import ray
 
 
 @pytest.fixture(scope="session", autouse=True)
 def ray_session():
-    ray.init(num_cpus=2, ignore_reinit_error=True)
+    ray.init(
+        ignore_reinit_error=True,
+        include_dashboard=False
+    )
     yield
     ray.shutdown()
 
