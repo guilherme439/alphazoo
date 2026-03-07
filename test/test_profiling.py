@@ -59,12 +59,12 @@ def test_profiling_connect_four() -> None:
     yappi.stop()
 
     os.makedirs("profiling", exist_ok=True)
-    yappi.get_func_stats().save("profiling/main_process.prof", type="pstat")
+    yappi.get_func_stats().save("profiling/main_profile.prof", type="pstat")
 
     del os.environ["ALPHAZOO_PROFILE"]
 
     print("\n\nProfiling complete.")
-    print("  Main process: profiling/main_process.prof")
+    print("  Main process: profiling/main_profile.prof")
     print("  Actor stats:  profiling/actor_profile.prof")
-    print("\nView with: snakeviz profiling/main_process.prof")
+    print("\nView with: snakeviz profiling/main_profile.prof")
     print("           snakeviz profiling/actor_profile.prof")
