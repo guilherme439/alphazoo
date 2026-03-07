@@ -89,11 +89,3 @@ class Gamer:
         record.set_terminal_value(terminal_value)
 
         return stats, record
-
-    # --- Async mode (deferred) ---
-    # def play_forever(self) -> None:
-    #     while not self.time_to_stop:
-    #         self.play_game(...)
-    #
-    # def stop(self) -> None:
-    #     self.time_to_stop = True

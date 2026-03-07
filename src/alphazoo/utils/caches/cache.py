@@ -29,8 +29,8 @@ class Cache(ABC):
         ...
 
     @abstractmethod
-    def clear(self) -> None:
-        ''' Clears the cache '''
+    def invalidate(self) -> None:
+        ''' Invalidates all cache entries '''
         ...
 
     @abstractmethod    

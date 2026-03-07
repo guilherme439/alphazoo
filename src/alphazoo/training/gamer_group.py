@@ -15,7 +15,8 @@ from .gamer import Gamer
 from .game_record import GameRecord
 
 
-@ray.remote(scheduling_strategy="SPREAD")
+# max_concurrency=2 so stop() can be called while play_forever() is running.
+@ray.remote(scheduling_strategy="SPREAD", max_concurrency=2)
 class GamerGroup:
 
     def __init__(
@@ -54,14 +55,22 @@ class GamerGroup:
         ]
 
         self._profile_stats: bytes | None = None
+        self._stop_event = threading.Event()
+        self._stats_lock = threading.Lock()
+        self._accumulated_stats: list[dict[str, float]] = []
+        self._last_network_version: int | None = None
 
-    def play_games(self, num_games: int) -> list[dict[str, float]]:
+    def _fetch_network(self) -> NetworkManager:
         network: NetworkManager = ray.get(self.shared_storage.get.remote(), timeout=200)
         network.check_devices()
         network.get_model().eval()
+        if self.cache is not None and self._last_network_version is not None:
+            if network.get_version() != self._last_network_version:
+                self.cache.invalidate()
+        self._last_network_version = network.get_version()
+        return network
 
-        profiling = os.environ.get("ALPHAZOO_PROFILE")
-
+    def _run_batch(self, network: NetworkManager, num_games: int) -> list[tuple[dict[str, float], GameRecord]]:
         results: list[tuple[dict[str, float], GameRecord]] = []
         results_lock = threading.Lock()
 
@@ -81,12 +90,6 @@ class GamerGroup:
                 with results_lock:
                     results.append((stats, record))
 
-        if profiling:
-            import yappi
-            yappi.clear_stats()
-            yappi.set_clock_type("wall")
-            yappi.start()
-
         threads = []
         for gamer in self.gamers:
             t = threading.Thread(target=worker, args=(gamer,))
@@ -95,6 +98,21 @@ class GamerGroup:
 
         for t in threads:
             t.join()
+
+        return results
+
+    def play_games(self, num_games: int) -> list[dict[str, float]]:
+        profiling = os.environ.get("ALPHAZOO_PROFILE")
+
+        network = self._fetch_network()
+
+        if profiling:
+            import yappi
+            yappi.clear_stats()
+            yappi.set_clock_type("wall")
+            yappi.start()
+
+        results = self._run_batch(network, num_games)
 
         if profiling:
             import tempfile
@@ -112,6 +130,29 @@ class GamerGroup:
             all_stats.append(stats)
 
         return all_stats
+
+    def play_forever(self) -> None:
+        while not self._stop_event.is_set():
+            network = self._fetch_network()
+            results = self._run_batch(network, self.num_workers)
+
+            with self._stats_lock:
+                for stats, record in results:
+                    self.record_queue.put((record, self.game_index))
+                    self._accumulated_stats.append(stats)
+
+    def stop(self) -> None:
+        self._stop_event.set()
+
+    def get_accumulated_stats(self) -> dict[str, Any]:
+        with self._stats_lock:
+            stats = self._accumulated_stats
+            self._accumulated_stats = []
+        result: dict[str, Any] = {"game_stats": stats}
+        if self.cache is not None:
+            result["cache_hit_ratio"] = self.cache.get_hit_ratio()
+            result["cache_length"] = float(self.cache.length())
+        return result
 
     def get_profile_stats(self) -> bytes | None:
         return self._profile_stats

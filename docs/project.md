@@ -27,8 +27,8 @@ The model must subclass either `AlphaZooNet` or `AlphaZooRecurrentNet` (both fro
 3. **Model distribution**: updated weights pushed to `RemoteStorage` for actors to pull
 
 Two execution modes:
-- **Sequential**: fixed games per step, then train (simpler)
-- **Asynchronous**: actors play continuously, training triggered on a timer
+- **Sequential**: fixed games per step, then train. Self-play and training never overlap.
+- **Asynchronous**: GamerGroups play continuously via `play_forever()`, training triggered on a timer (`update_delay`). The trainer drains the record queue each step, trains, and pushes updated weights. Groups detect weight changes via `NetworkManager.get_version()` and invalidate their cache when the network updates.
 
 ### MCTS (`search/`)
 
@@ -47,19 +47,19 @@ Two execution modes:
 
 ### Self-Play Records (`training/game_record.py`, `training/replay_buffer.py`)
 
-`GameRecord` stores per-game trajectories (states, MCTS policy targets, value targets). `ReplayBuffer` is a Ray actor that accumulates records and serves training batches.
+`GameRecord` stores per-game trajectories (states, MCTS policy targets, value targets). `ReplayBuffer` accumulates records locally in the trainer process and serves training batches.
 
 ### Distributed Architecture
 
 Ray actors for parallelism:
-- `GamerGroup` (`training/gamer_group.py`): each group is a Ray actor running K worker threads that share one cache and one network copy. `Gamer` (`training/gamer.py`) is a plain class used per-thread.
+- `GamerGroup` (`training/gamer_group.py`): each group is a Ray actor running K worker threads that share one cache and one network copy. `Gamer` (`training/gamer.py`) is a plain class used per-thread. Supports `play_games(n)` for sequential mode and `play_forever()`/`stop()` for async mode.
 - `ReplayBuffer`: shared training data store
-- `RemoteStorage` (`utils/remote_storage.py`): model version storage (keeps last N versions)
+- `RemoteStorage` (`utils/remote_storage.py`): generic item storage (keeps last N items)
 
 ### Caching (`utils/caches/`)
 
 Optional tensor caching to avoid redundant network evaluations during MCTS:
-- `KeylessCache`: direct-mapped with blake2b hashing, no key storage
+- `KeylessCache`: direct-mapped with blake2b hashing, no key storage. Uses a generation counter for O(1) `invalidate()` — incrementing the generation makes all existing entries invisible without touching them; old slots are lazily overwritten on subsequent puts.
 
 ### Configuration (`configs/`)
 
@@ -100,6 +100,8 @@ Controls how the network's value output is interpreted relative to players.
 - `recurrent_inference(state, training, iters_to_do, interim_thought)`: for `AlphaZooRecurrentNet`, returns `((policy_logits, value_estimate), interim_thought)`.
 
 Use `network_manager.is_recurrent()` to branch on network type at call sites.
+
+Tracks a version counter used by GamerGroups to detect weight changes and invalidate their cache.
 
 ## Key Dependencies
 

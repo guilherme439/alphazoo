@@ -15,7 +15,14 @@ class NetworkManager:
                 "See alphazoo.networks for the available base classes."
             )
         self.model = model
+        self._version: int = 0
         self.check_devices()
+
+    def get_version(self) -> int:
+        return self._version
+
+    def increment_version(self) -> None:
+        self._version += 1
 
     def is_recurrent(self) -> bool:
         return isinstance(self.model, AlphaZooRecurrentNet)

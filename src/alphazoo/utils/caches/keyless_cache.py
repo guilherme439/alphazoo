@@ -28,6 +28,13 @@ class KeylessCache(Cache):
     the newer one evicts the older.
 
     Thread safety is provided by per-slot read-write locks (RWLockFair).
+
+    Invalidation uses a generation counter: each slot records the generation
+    it was written in, and the cache tracks a global generation. A slot is
+    only considered occupied when its generation matches the current one.
+    Calling invalidate() increments the generation in O(1), making all
+    existing entries invisible without touching them. Old slots are lazily
+    overwritten on subsequent puts.
     """
 
     def __init__(self, max_size: int) -> None:
@@ -47,7 +54,8 @@ class KeylessCache(Cache):
         self._digest_bytes = math.ceil(total_bits / 8)
         self._index_mask = self.size - 1
 
-        self.occupied: list[bool] = [False] * self.size
+        self._generation: int = 0
+        self._slot_generations: list[int] = [0] * self.size
         self.fingerprints: list[int] = [0] * self.size
         self.values: list[Any] = [None] * self.size
 
@@ -60,6 +68,9 @@ class KeylessCache(Cache):
         self._rlocks = [lk.gen_rlock() for lk in self._rw_locks]
         self._wlocks = [lk.gen_wlock() for lk in self._rw_locks]
 
+    def _is_occupied(self, index: int) -> bool:
+        return self._slot_generations[index] == self._generation
+
     def _hash_tensor(self, tensor: torch.Tensor) -> int:
         raw = hashlib.blake2b(tensor.numpy().tobytes(), digest_size=self._digest_bytes).digest()
         return int.from_bytes(raw, "little")
@@ -68,7 +79,6 @@ class KeylessCache(Cache):
         return h & self._index_mask
 
     def _extract_fingerprint(self, h: int) -> int:
-        # everything above the index bits becomes the fingerprint
         return h >> self._index_bits
 
     def get(self, key: torch.Tensor) -> Any | None:
@@ -76,7 +86,7 @@ class KeylessCache(Cache):
         index = self._extract_index(h)
         fingerprint = self._extract_fingerprint(h)
         with self._rlocks[index]:
-            if self.occupied[index] and self.fingerprints[index] == fingerprint:
+            if self._is_occupied(index) and self.fingerprints[index] == fingerprint:
                 self.hits += 1
                 return self.values[index]
             self.misses += 1
@@ -87,7 +97,7 @@ class KeylessCache(Cache):
         index = self._extract_index(h)
         fingerprint = self._extract_fingerprint(h)
         with self._rlocks[index]:
-            return self.occupied[index] and self.fingerprints[index] == fingerprint
+            return self._is_occupied(index) and self.fingerprints[index] == fingerprint
 
     def put(self, item: tuple[torch.Tensor, Any]) -> None:
         key, value = item
@@ -95,12 +105,12 @@ class KeylessCache(Cache):
         index = self._extract_index(h)
         fingerprint = self._extract_fingerprint(h)
         with self._wlocks[index]:
-            if self.occupied[index]:
+            if self._is_occupied(index):
                 if self.fingerprints[index] != fingerprint:
                     self.evictions += 1
             else:
                 self.num_items += 1
-                self.occupied[index] = True
+            self._slot_generations[index] = self._generation
             self.fingerprints[index] = fingerprint
             self.values[index] = value
 
@@ -109,25 +119,23 @@ class KeylessCache(Cache):
         index = self._extract_index(h)
         fingerprint = self._extract_fingerprint(h)
         with self._wlocks[index]:
-            if self.occupied[index] and self.fingerprints[index] == fingerprint:
+            if self._is_occupied(index) and self.fingerprints[index] == fingerprint:
                 self.hits += 1
                 return self.values[index]
             self.misses += 1
             value = producer()
-            if self.occupied[index]:
+            if self._is_occupied(index):
                 if self.fingerprints[index] != fingerprint:
                     self.evictions += 1
             else:
                 self.num_items += 1
-                self.occupied[index] = True
+            self._slot_generations[index] = self._generation
             self.fingerprints[index] = fingerprint
             self.values[index] = value
             return value
 
-    def clear(self) -> None:
-        self.occupied = [False] * self.size
-        self.fingerprints = [0] * self.size
-        self.values = [None] * self.size
+    def invalidate(self) -> None:
+        self._generation += 1
         self.num_items = 0
         self.hits = 0
         self.misses = 0

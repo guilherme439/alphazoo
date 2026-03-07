@@ -114,7 +114,6 @@ class AlphaZoo:
         cache_enabled = config.cache.enabled
         cache_max = config.cache.max_size
 
-        storage_frequency = 1
 
         if config.recurrent is not None:
             pred_iterations = config.recurrent.pred_iterations
@@ -210,12 +209,26 @@ class AlphaZoo:
                 early_fill=True
             )
 
-        # --- Async mode (deferred) ---
-        # actor_list: list[Any] = []
-        # termination_futures: list[Any] = []
-        # if running_mode == "asynchronous":
-        #     actor_list = [GamerGroup.remote(...) for _ in range(num_groups)]
-        #     termination_futures = [actor.play_forever.remote() for actor in actor_list]
+        # ---- ASYNC MODE SETUP ---- #
+
+        async_groups: list[Any] = []
+        async_futures: list[Any] = []
+        if running_mode == "asynchronous":
+            game = self.games[0]
+            async_search_config = deepcopy(self.config.search)
+            async_groups = [GamerGroup.remote(
+                self.record_queue,
+                self.network_storage,
+                game,
+                0,
+                async_search_config,
+                pred_iterations,
+                workers_per_group,
+                cache_enabled,
+                cache_max,
+                self.config.learning.player_dependent_value,
+            ) for _ in range(num_groups)]
+            async_futures = [group.play_forever.remote() for group in async_groups]
 
         # ---- MAIN TRAINING LOOP ---- #
 
@@ -223,7 +236,6 @@ class AlphaZoo:
         self.train_global_policy_loss: list[tuple[int, float]] = []
         self.train_global_combined_loss: list[tuple[int, float]] = []
 
-        
         metrics: dict[str, Any] = {}
         self.clear_metrics(metrics)
 
@@ -231,6 +243,7 @@ class AlphaZoo:
         for step in steps_to_run:
             self.current_step = step
             step_start = time.time()
+
             if running_mode == "sequential":
                 self.run_selfplay(
                     num_games_per_type_per_step,
@@ -238,9 +251,11 @@ class AlphaZoo:
                     cache_max=cache_max,
                     metrics=metrics
                 )
+            elif running_mode == "asynchronous":
+                self.wait_for_delay(update_delay)
 
             print("\n\nLearning rate: " + str(self.scheduler.get_last_lr()[0]))
-            self.train_network(
+            trained = self.train_network(
                 learning_method,
                 policy_loss_function,
                 value_loss_function,
@@ -250,16 +265,33 @@ class AlphaZoo:
                 batch_size
             )
 
-            if storage_frequency and (step % storage_frequency == 0):
+            if trained:
+                self.latest_network.increment_version()
                 self.latest_network.model_to_cpu()
                 ray.get(self.network_storage.store.remote(self.latest_network))
                 self.latest_network.model_to_device()
 
             if running_mode == "asynchronous":
-                self.wait_for_delay(update_delay)
+                # FIXME: The entire stat-tracking shenanigans need to be simplified and improved
+                stats_futures = [g.get_accumulated_stats.remote() for g in async_groups]
+                all_group_data = ray.get(stats_futures)
+                total_moves = 0
+                total_games = 0
+                for group_data in all_group_data:
+                    for s in group_data["game_stats"]:
+                        total_moves += s["number_of_moves"]
+                        total_games += 1
+                if total_games > 0:
+                    metrics["episode_len_mean"] = total_moves / total_games
+
+                if cache_enabled:
+                    avg_hit_ratio = sum(gd.get("cache_hit_ratio", 0) for gd in all_group_data) / len(all_group_data)
+                    avg_cache_len = sum(gd.get("cache_length", 0) for gd in all_group_data) / len(all_group_data)
+                    print("Games: " + str(total_games) +
+                          " | Cache avg hit ratio: " + format(avg_hit_ratio, '.4') +
+                          " | avg len: " + format(avg_cache_len, '.6'))
 
             step_end = time.time()
-
 
             # end of step metrics
             value_loss = self.train_global_value_loss
@@ -285,12 +317,12 @@ class AlphaZoo:
 
             print("\n-------------------------------------\n\n")
 
-        # --- Async mode (deferred) ---
-        # if running_mode == "asynchronous":
-        #     print("Waiting for actors to finish their games\n")
-        #     for actor in actor_list:
-        #         actor.stop.remote()
-        #     ray.get(termination_futures)
+        if running_mode == "asynchronous":
+            print("Waiting for actors to finish their current games\n")
+            for group in async_groups:
+                group.stop.remote()
+            ray.get(async_futures)
+            self._drain_record_queue()
 
         print("All done.\nExiting")
 
@@ -421,7 +453,7 @@ class AlphaZoo:
         prog_alpha: float,
         use_progressive_loss: bool,
         batch_size: int,
-    ) -> None:
+    ) -> bool:
         start = time.time()
         self._drain_record_queue()
 
@@ -432,6 +464,10 @@ class AlphaZoo:
         n_games: int = self.replay_buffer.played_games()
 
         print("\nReplay buffer: " + str(replay_size) + " positions, " + str(n_games) + " games.")
+
+        if replay_size < batch_size:
+            print("Not enough data for training (need " + str(batch_size) + "). Skipping.")
+            return False
 
         if learning_method == "epochs":
             self.train_with_epochs(batch_size, replay_size,
@@ -448,6 +484,7 @@ class AlphaZoo:
 
         end = time.time()
         print("Training time(s): " + format(end - start, '.4'))
+        return True
 
     def train_with_epochs(
         self,
