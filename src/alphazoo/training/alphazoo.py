@@ -785,7 +785,7 @@ class AlphaZoo:
         small_rest = delay_period_seconds / divisions
         for i in range(divisions):
             time.sleep(small_rest)
-        print("Delay of " + format(delay_period_seconds, '.1f') + "s completed.")
+        print("\nDelay of " + format(delay_period_seconds, '.1f') + "s completed.\n")
 
     def clear_metrics(self, m: dict[str, Any]) -> None:
         m["step"] = 0
