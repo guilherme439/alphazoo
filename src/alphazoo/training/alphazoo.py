@@ -780,12 +780,12 @@ class AlphaZoo:
     def get_replay_buffer_state(self) -> dict:
         return self.replay_buffer.get_state()
 
-    def wait_for_delay(self, delay_period: int) -> None:
-        divisions = 10
-        small_rest = delay_period / divisions
+    def wait_for_delay(self, delay_period_seconds: int) -> None:
+        divisions = 20
+        small_rest = delay_period_seconds / divisions
         for i in range(divisions):
             time.sleep(small_rest)
-        print("Delay of " + format(delay_period, '.1f') + "s completed.")
+        print("Delay of " + format(delay_period_seconds, '.1f') + "s completed.")
 
     def clear_metrics(self, m: dict[str, Any]) -> None:
         m["step"] = 0
