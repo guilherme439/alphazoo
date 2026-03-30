@@ -28,6 +28,10 @@ class MockGame:
         clone._player = self._player
         return clone
 
+    def copy_state_from(self, source):
+        self._depth = source._depth
+        self._player = source._player
+
     def step(self, action: int):
         self._depth += 1
         self._player = 2 if self._player == 1 else 1

@@ -47,6 +47,16 @@ class IAlphazooGame(ABC):
         """
         ...
 
+    @abstractmethod
+    def copy_state_from(self, source: "IAlphazooGame") -> None:
+        """
+        Copy the full game state from source into this object.
+
+        Used to reset a reusable scratch game to a given state without
+        allocating new objects.
+        """
+        ...
+
     # ------------------------------------------------------------------
     # State queries
     # ------------------------------------------------------------------
@@ -100,7 +110,7 @@ class IAlphazooGame(ABC):
         ...
 
     @abstractmethod
-    def obs_to_state(self, obs: Any, agent_id: Any) -> torch.Tensor:
+    def obs_to_state(self, obs: dict, agent_id: Any) -> torch.Tensor:
         """Convert a raw PettingZoo observation dict to a network input tensor."""
         ...
 

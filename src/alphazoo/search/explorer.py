@@ -41,6 +41,7 @@ class Explorer:
         self.training = training
         self.player_dependent_value = player_dependent_value
         self.rng = np.random.default_rng()
+        self._scratch_game: Any = None
 
     def run_mcts(
         self,
@@ -58,9 +59,13 @@ class Explorer:
             self.add_exploration_noise(search_start)
 
         num_searches: int = self.config.simulation.mcts_simulations
+        if self._scratch_game is None:
+            self._scratch_game = game.shallow_clone()
+
         for i in range(num_searches):
             node = search_start
-            scratch_game = game.shallow_clone()
+            self._scratch_game.copy_state_from(game)
+            scratch_game = self._scratch_game
             search_path: list[Node] = [node]
 
             while node.expanded():

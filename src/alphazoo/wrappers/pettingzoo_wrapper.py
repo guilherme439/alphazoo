@@ -29,6 +29,7 @@ class PettingZooWrapper(IAlphazooGame):
         self.env.reset()
         self._num_actions = self._compute_num_actions()
         self._step_count = 0
+        self._obs_is_float32 = self._check_obs_dtype() # we check the type to avoid unnecessary convertions
 
     def reset(self, *args, **kwargs) -> None:
         self.env.reset(*args, **kwargs)
@@ -53,6 +54,24 @@ class PettingZooWrapper(IAlphazooGame):
         clone.env = self._clone_pettingzoo_env(self.env)
         return clone
 
+    def copy_state_from(self, source: "PettingZooWrapper") -> None:
+        for key, val in source.__dict__.items():
+            if key == 'env':
+                continue
+            setattr(self, key, val)
+
+        src_layer = source.env
+        dst_layer = self.env
+        while True:
+            for attr_name, attr_value in vars(src_layer).items():
+                if attr_name == 'env':
+                    continue
+                setattr(dst_layer, attr_name, self._copy_attr(attr_value))
+            if not hasattr(src_layer, 'env'):
+                break
+            src_layer = src_layer.env
+            dst_layer = dst_layer.env
+
     # ------------------------------------------------------------------
     # Observation interface
     # ------------------------------------------------------------------
@@ -60,14 +79,17 @@ class PettingZooWrapper(IAlphazooGame):
     def observe(self) -> dict:
         return self.env.observe(self.env.agent_selection)
 
-    def obs_to_state(self, obs: Any, agent_id: Any) -> torch.Tensor:
+    def obs_to_state(self, obs: dict, agent_id: Any) -> torch.Tensor:
         """
         Convert a raw PettingZoo observation dict to a network input tensor.
 
         Default: extracts ``obs["observation"]`` and returns a float32 tensor
         with shape ``(1, *obs_shape)``.
         """
-        return torch.tensor(obs["observation"], dtype=torch.float32).unsqueeze(0)
+        observation = obs["observation"]
+        if not self._obs_is_float32:
+            observation = observation.astype(np.float32)
+        return torch.from_numpy(observation).unsqueeze(0)
 
     def action_mask(self, obs: dict) -> np.ndarray:
         if isinstance(obs, dict) and 'action_mask' in obs:
@@ -98,6 +120,13 @@ class PettingZooWrapper(IAlphazooGame):
     # Internals
     # ------------------------------------------------------------------
 
+    def _check_obs_dtype(self) -> bool:
+        agent = self.env.agent_selection
+        obs_space = self.env.observation_space(agent)
+        if hasattr(obs_space, 'spaces') and 'observation' in obs_space.spaces:
+            return obs_space.spaces['observation'].dtype == np.float32
+        return obs_space.dtype == np.float32
+
     def _extract_player(self, agent: Any) -> int:
         """Returns 1-indexed (1, 2) based on agent position in possible_agents,
         to match AlphaZero's convention where player 2's values are negated
@@ -117,43 +146,38 @@ class PettingZooWrapper(IAlphazooGame):
         """
         Clone a PettingZoo environment, preserving its full runtime state.
 
-        Tree-search algorithms like MCTS need to clone environments to explore
-        hypothetical moves. However, PettingZoo (and Gymnasium) never standardized
-        a way to copy or snapshot environment state. Worse, PettingZoo's EzPickle
-        base class overrides serialization so that deepcopy/pickle only preserve
-        constructor arguments, silently discarding all runtime state (board, turns,
-        rewards, etc.).
-
-        This function works around EzPickle by:
-        1. Using deepcopy(original_env) to obtain a structurally identical fresh env.
-           For EzPickle-based raw envs, deepcopy triggers re-construction via stored
-           kwargs (yielding a fresh initial state at the innermost layer). Outer wrapper
-           layers are deepcopied normally.
-        2. Walking both wrapper chains in lockstep (OrderEnforcing -> Assert ->
-            TerminateIllegal -> raw_env)
-        3. Deep-copying each layer's instance variables onto the fresh env, overwriting
-           everything with the correct current state.
-
-        Args:
-            original_env: The PettingZoo env to clone (may be wrapped in multiple layers).
-
-        Returns:
-            A new env instance with identical runtime state, fully independent from the original.
+        Bypasses PettingZoo's EzPickle (which discards runtime state on deepcopy)
+        by constructing bare objects with object.__new__ and copying attributes
+        directly. This avoids the cost of __init__, reset(), or double-deepcopy.
         """
-        fresh_env = deepcopy(original_env)
-        fresh_env.reset()
-
-        original_layer = original_env
-        fresh_layer = fresh_env
+        layers = []
+        layer = original_env
         while True:
-            for attr_name, attr_value in vars(original_layer).items():
-                if attr_name == 'env':  # skip wrapper-chain pointer
-                    continue
-                setattr(fresh_layer, attr_name, deepcopy(attr_value))
-
-            if not hasattr(original_layer, 'env'):
+            layers.append(layer)
+            if not hasattr(layer, 'env'):
                 break
-            original_layer = original_layer.env
-            fresh_layer = fresh_layer.env
+            layer = layer.env
 
-        return fresh_env
+        prev_clone = None
+        for original_layer in reversed(layers):
+            clone_layer = object.__new__(type(original_layer))
+            for attr_name, attr_value in vars(original_layer).items():
+                if attr_name == 'env':
+                    continue
+                setattr(clone_layer, attr_name, self._copy_attr(attr_value))
+            if prev_clone is not None:
+                clone_layer.env = prev_clone
+            prev_clone = clone_layer
+
+        return prev_clone
+    
+    def _copy_attr(self, value: Any) -> Any:
+        if isinstance(value, (str, int, float, bool, type(None), tuple)):
+            return value
+        if isinstance(value, dict):
+            return value.copy()
+        if isinstance(value, list):
+            return value.copy()
+        if isinstance(value, np.ndarray):
+            return value.copy()
+        return deepcopy(value)
