@@ -51,7 +51,7 @@ def search_config():
 
 @pytest.fixture
 def network():
-    return NetworkManager(TicTacToeNet())
+    return NetworkManager(TicTacToeNet(), device="cpu")
 
 
 def make_game():
@@ -136,7 +136,7 @@ class TestTicTacToeStrategic:
     def test_finds_winning_move_for_player_1(self, search_config):
         """p1 has diagonal 0-4, can win with 8. MCTS should find it."""
         cfg = make_high_sim_config(search_config, n_sims=64)
-        net = NetworkManager(UniformTicTacToeNet())
+        net = NetworkManager(UniformTicTacToeNet(), device="cpu")
         explorer = Explorer(cfg, training=False)
 
         game = make_game()
@@ -153,7 +153,7 @@ class TestTicTacToeStrategic:
     def test_finds_winning_move_for_player_2(self, search_config):
         """p2 has 3-4, can win with 5 (middle row). MCTS should find it."""
         cfg = make_high_sim_config(search_config, n_sims=64)
-        net = NetworkManager(UniformTicTacToeNet())
+        net = NetworkManager(UniformTicTacToeNet(), device="cpu")
         explorer = Explorer(cfg, training=False)
 
         game = make_game()
@@ -171,7 +171,7 @@ class TestTicTacToeStrategic:
     def test_winning_move_gets_most_visits(self, search_config):
         """The winning child node should accumulate the most visits."""
         cfg = make_high_sim_config(search_config, n_sims=64)
-        net = NetworkManager(UniformTicTacToeNet())
+        net = NetworkManager(UniformTicTacToeNet(), device="cpu")
         explorer = Explorer(cfg, training=False)
 
         game = make_game()

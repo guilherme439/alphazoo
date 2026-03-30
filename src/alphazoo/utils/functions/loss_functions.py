@@ -4,32 +4,25 @@ from torch import Tensor
 
 
 def KLDivergence(input: Tensor, target: Tensor) -> Tensor:
-    ''' Calculates the Kullback-Leibler divergence loss. Expects to NEITHER input nor target to be in log-space.'''
-    input = nn.functional.log_softmax(input, dim=0)
-    kld = nn.KLDivLoss()
-    return kld(input, target)
+    ''' Calculates the Kullback-Leibler divergence loss. Expects neither input nor target to be in log-space.'''
+    log_input = nn.functional.log_softmax(input, dim=-1)
+    return nn.functional.kl_div(log_input, target, reduction='batchmean')
 
 
 def MSError(input: Tensor, target: Tensor) -> Tensor:
-    ''' Calculates Mean Squared between valid actions. Ilegal actions are ignored with this loss function.'''
-    valid_actions = 0
-    loss: Tensor | float = 0.0
-    input = nn.functional.softmax(input, dim=0)
-    for a in range(len(target)):
-        target_value = target[a]
-        if target_value != 0:
-            valid_actions += 1
-            input_value = input[a]
-            loss += (target_value - input_value) ** 2
-
-    return loss / valid_actions  # type: ignore[return-value]
+    ''' Calculates Mean Squared Error between valid actions. Illegal actions are ignored.'''
+    input = nn.functional.softmax(input, dim=-1)
+    mask = target != 0
+    sq_diff = (target - input) ** 2 * mask
+    valid_counts = mask.sum(dim=-1).float()
+    return (sq_diff.sum(dim=-1) / valid_counts).mean()
 
 
 def SquaredError(input: Tensor, target: Tensor) -> Tensor:
-    ''' Calculates Squared Error between two values.'''
-    return (target - input) ** 2
+    ''' Calculates mean Squared Error between two values.'''
+    return ((target - input) ** 2).mean()
 
 
 def AbsoluteError(input: Tensor, target: Tensor) -> Tensor:
-    ''' Calculates Absolute Error between two values.'''
-    return torch.abs(target - input)
+    ''' Calculates mean Absolute Error between two values.'''
+    return torch.abs(target - input).mean()

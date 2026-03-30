@@ -127,6 +127,7 @@ class SchedulerConfig:
 
 @dataclass
 class AlphaZooConfig:
+    verbose: bool = True
     running: RunningConfig = field(default_factory=RunningConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
     learning: LearningConfig = field(default_factory=LearningConfig)

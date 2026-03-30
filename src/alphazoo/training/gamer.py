@@ -32,7 +32,12 @@ class Gamer:
 
         self.explorer = Explorer(search_config, True, player_dependent_value)
 
-    def play_game(self, network: NetworkManager, cache: KeylessCache | None = None) -> tuple[dict[str, float], GameRecord]:
+    def play_game(
+        self,
+        network_manager: NetworkManager,
+        cache: KeylessCache | None = None
+    ) -> tuple[dict[str, float], GameRecord]:
+        
         stats: dict[str, float] = {
             "number_of_moves": 0,
             "average_children": 0,
@@ -41,7 +46,6 @@ class Gamer:
             "average_bias_value": 0,
             "final_bias_value": 0,
         }
-
         self.game.reset()
         game = self.game
         num_actions = game.get_num_actions()
@@ -57,7 +61,7 @@ class Gamer:
             record.add_step(state, game.get_current_player())
 
             action_i, chosen_child, root_bias = self.explorer.run_mcts(
-                game, network, root_node, self.recurrent_iterations, cache,
+                game, network_manager, root_node, self.recurrent_iterations, cache,
             )
 
             tree_size = root_node.get_visit_count()

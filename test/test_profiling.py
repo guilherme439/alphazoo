@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 
 import pytest
 import torch
@@ -59,12 +60,15 @@ def test_profiling_connect_four() -> None:
     yappi.stop()
 
     os.makedirs("profiling", exist_ok=True)
-    yappi.get_func_stats().save("profiling/main_profile.prof", type="pstat")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    main_prof = f"profiling/main_profile_{timestamp}.prof"
+    actor_prof = f"profiling/actor_profile_{timestamp}.prof"
+    yappi.get_func_stats().save(main_prof, type="pstat")
 
     del os.environ["ALPHAZOO_PROFILE"]
 
     print("\n\nProfiling complete.")
-    print("  Main process: profiling/main_profile.prof")
-    print("  Actor stats:  profiling/actor_profile.prof")
-    print("\nView with: snakeviz profiling/main_profile.prof")
-    print("           snakeviz profiling/actor_profile.prof")
+    print(f"  Main process: {main_prof}")
+    print(f"  Actor stats:  {actor_prof}")
+    print(f"\nView with: snakeviz {main_prof}")
+    print(f"           snakeviz {actor_prof}")

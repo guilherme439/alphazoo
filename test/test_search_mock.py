@@ -64,7 +64,7 @@ class TestNode:
 class TestEvaluate:
     def test_respects_action_mask(self, search_config):
         explorer = Explorer(search_config, training=False)
-        explorer.network = MockNetworkManager(MockNet(num_actions=4))
+        explorer.network_manager = MockNetworkManager(MockNet(num_actions=4))
         explorer.recurrent_iterations = 2
 
         game = MockGame(num_actions=4, action_mask=[1.0, 0.0, 1.0, 0.0])
@@ -75,7 +75,7 @@ class TestEvaluate:
 
     def test_sets_to_play(self, search_config):
         explorer = Explorer(search_config, training=False)
-        explorer.network = MockNetworkManager(MockNet())
+        explorer.network_manager = MockNetworkManager(MockNet())
         explorer.recurrent_iterations = 2
 
         game = MockGame()
@@ -86,7 +86,7 @@ class TestEvaluate:
 
     def test_terminal_returns_value_without_expanding(self, search_config):
         explorer = Explorer(search_config, training=False)
-        explorer.network = MockNetworkManager(MockNet())
+        explorer.network_manager = MockNetworkManager(MockNet())
         explorer.recurrent_iterations = 2
 
         game = MockGame(max_depth=0)
@@ -99,7 +99,7 @@ class TestEvaluate:
 
     def test_priors_sum_to_one(self, search_config):
         explorer = Explorer(search_config, training=False)
-        explorer.network = MockNetworkManager(MockNet())
+        explorer.network_manager = MockNetworkManager(MockNet())
         explorer.recurrent_iterations = 2
 
         node = Node(0)
@@ -110,7 +110,7 @@ class TestEvaluate:
 
     def test_biased_policy_produces_biased_priors(self, search_config):
         explorer = Explorer(search_config, training=False)
-        explorer.network = MockNetworkManager(MockNet(fixed_policy=[10.0, -10.0, -10.0, -10.0]))
+        explorer.network_manager = MockNetworkManager(MockNet(fixed_policy=[10.0, -10.0, -10.0, -10.0]))
         explorer.recurrent_iterations = 2
 
         node = Node(0)

@@ -1,3 +1,5 @@
+verbose: true
+
 running:
   running_mode: "sequential"
   training_steps: 100

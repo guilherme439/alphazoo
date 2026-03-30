@@ -66,6 +66,7 @@ Optional tensor caching to avoid redundant network evaluations during MCTS:
 Dataclass hierarchy with defaults:
 ```
 AlphaZooConfig
+├── verbose (toggle training logs)
 ├── RunningConfig (sequential vs async, num groups, workers per group, training steps)
 ├── CacheConfig (enabled, max size)
 ├── RecurrentConfig | None  (required when using AlphaZooRecurrentNet)

@@ -45,12 +45,12 @@ class Explorer:
     def run_mcts(
         self,
         game: Any,
-        network: NetworkManager,
+        network_manager: NetworkManager,
         root_node: Node,
         recurrent_iterations: int = 1,
         cache: KeylessCache | None = None,
     ) -> tuple[int, Node, float]:
-        self.network = network
+        self.network_manager = network_manager
         self.recurrent_iterations = recurrent_iterations
         search_start = root_node
 
@@ -183,10 +183,10 @@ class Explorer:
         return value
 
     def _eval_inference(self, state: Any) -> tuple[Any, Any]:
-        if self.network.is_recurrent():
-            (policy, value), _ = self.network.recurrent_inference(state, False, self.recurrent_iterations)
+        if self.network_manager.is_recurrent():
+            (policy, value), _ = self.network_manager.recurrent_inference(state, False, self.recurrent_iterations)
         else:
-            policy, value = self.network.inference(state, False)
+            policy, value = self.network_manager.inference(state, False)
         return softmax(policy), value
 
     def max_action(self, visit_counts: list[tuple[int, int]]) -> int:

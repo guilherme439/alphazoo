@@ -5,7 +5,10 @@ import threading
 from copy import deepcopy
 from typing import Any
 
+import tempfile
+
 import ray
+import yappi
 
 from ..configs.search_config import SearchConfig
 from ..networks.network_manager import NetworkManager
@@ -31,6 +34,7 @@ class GamerGroup:
         cache_enabled: bool,
         cache_max_size: int,
         player_dependent_value: bool,
+        network_manager: NetworkManager,
     ) -> None:
         self.record_queue = record_queue
         self.shared_storage = shared_storage
@@ -42,6 +46,9 @@ class GamerGroup:
             self.cache: KeylessCache | None = create_cache(cache_max_size)
         else:
             self.cache = None
+
+        self.local_network_manager = network_manager
+        self.local_network_manager.get_model().eval()
 
         self.gamers = [
             Gamer(
@@ -61,16 +68,16 @@ class GamerGroup:
         self._last_network_version: int | None = None
 
     def _fetch_network(self) -> NetworkManager:
-        network: NetworkManager = ray.get(self.shared_storage.get.remote(), timeout=200)
-        network.check_devices()
-        network.get_model().eval()
-        if self.cache is not None and self._last_network_version is not None:
-            if network.get_version() != self._last_network_version:
+        state_dict, version = ray.get(self.shared_storage.get.remote(), timeout=200)
+        if self._last_network_version is None or version != self._last_network_version:
+            if self.cache is not None and self._last_network_version is not None:
                 self.cache.invalidate()
-        self._last_network_version = network.get_version()
-        return network
+            self.local_network_manager.load_state_dict(state_dict)
+            self._last_network_version = version
+        self.local_network_manager.get_model().eval()
+        return self.local_network_manager
 
-    def _run_batch(self, network: NetworkManager, num_games: int) -> list[tuple[dict[str, float], GameRecord]]:
+    def _run_batch(self, network_manager: NetworkManager, num_games: int) -> list[tuple[dict[str, float], GameRecord]]:
         results: list[tuple[dict[str, float], GameRecord]] = []
         results_lock = threading.Lock()
 
@@ -85,7 +92,7 @@ class GamerGroup:
                         return
                     games_launched += 1
 
-                stats, record = gamer.play_game(network, self.cache)
+                stats, record = gamer.play_game(network_manager, self.cache)
 
                 with results_lock:
                     results.append((stats, record))
@@ -104,25 +111,17 @@ class GamerGroup:
     def play_games(self, num_games: int) -> list[dict[str, float]]:
         profiling = os.environ.get("ALPHAZOO_PROFILE")
 
-        network = self._fetch_network()
+        network_manager = self._fetch_network()
 
         if profiling:
-            import yappi
             yappi.clear_stats()
             yappi.set_clock_type("wall")
             yappi.start()
 
-        results = self._run_batch(network, num_games)
+        results = self._run_batch(network_manager, num_games)
 
         if profiling:
-            import tempfile
-            yappi.stop()
-            with tempfile.NamedTemporaryFile(suffix=".prof", delete=False) as tmp:
-                tmp_path = tmp.name
-            yappi.get_func_stats().save(tmp_path, type="pstat")
-            with open(tmp_path, "rb") as f:
-                self._profile_stats = f.read()
-            os.unlink(tmp_path)
+            self._capture_profile_stats()
 
         all_stats = []
         for stats, record in results:
@@ -133,8 +132,8 @@ class GamerGroup:
 
     def play_forever(self) -> None:
         while not self._stop_event.is_set():
-            network = self._fetch_network()
-            results = self._run_batch(network, self.num_workers)
+            network_manager = self._fetch_network()
+            results = self._run_batch(network_manager, self.num_workers)
 
             with self._stats_lock:
                 for stats, record in results:
@@ -164,3 +163,12 @@ class GamerGroup:
             "hit_ratio": self.cache.get_hit_ratio(),
             "length": float(self.cache.length()),
         }
+
+    def _capture_profile_stats(self) -> None:
+        yappi.stop()
+        with tempfile.NamedTemporaryFile(suffix=".prof", delete=False) as tmp:
+            tmp_path = tmp.name
+        yappi.get_func_stats().save(tmp_path, type="pstat")
+        with open(tmp_path, "rb") as f:
+            self._profile_stats = f.read()
+        os.unlink(tmp_path)

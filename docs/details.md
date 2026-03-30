@@ -94,6 +94,7 @@ A full annotated example is available at [`configs/examples/connect_four.yaml`](
 
 ```
 AlphaZooConfig
+├── verbose                 toggle training logs
 ├── running: RunningConfig
 │   ├── running_mode        "sequential" | "asynchronous"
 │   ├── num_groups          number of Ray GamerGroup actors

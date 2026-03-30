@@ -1,3 +1,5 @@
+verbose: true
+
 running:
   running_mode: "sequential"
   num_groups: 1

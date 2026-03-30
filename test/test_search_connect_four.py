@@ -53,7 +53,7 @@ def search_config():
 
 @pytest.fixture
 def network():
-    return NetworkManager(ConnectFourNet())
+    return NetworkManager(ConnectFourNet(), device="cpu")
 
 
 def make_game():
@@ -173,7 +173,7 @@ class TestConnectFourStrategic:
     def test_finds_winning_move_for_player_1(self, search_config):
         """p1 has 3 in col 0, can win by playing col 0."""
         cfg = make_high_sim_config(search_config, n_sims=64)
-        net = NetworkManager(UniformConnectFourNet())
+        net = NetworkManager(UniformConnectFourNet(), device="cpu")
         explorer = Explorer(cfg, training=False)
 
         game = make_game()
@@ -188,7 +188,7 @@ class TestConnectFourStrategic:
     def test_finds_winning_move_for_player_2(self, search_config):
         """p2 has 3 in col 2, can win by playing col 2."""
         cfg = make_high_sim_config(search_config, n_sims=64)
-        net = NetworkManager(UniformConnectFourNet())
+        net = NetworkManager(UniformConnectFourNet(), device="cpu")
         explorer = Explorer(cfg, training=False)
 
         game = make_game()
@@ -205,7 +205,7 @@ class TestConnectFourStrategic:
     def test_winning_move_gets_most_visits(self, search_config):
         """The winning child node should accumulate the most visits."""
         cfg = make_high_sim_config(search_config, n_sims=64)
-        net = NetworkManager(UniformConnectFourNet())
+        net = NetworkManager(UniformConnectFourNet(), device="cpu")
         explorer = Explorer(cfg, training=False)
 
         game = make_game()

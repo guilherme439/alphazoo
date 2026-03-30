@@ -2,7 +2,14 @@
 AlphaZoo: Standalone AlphaZero implementation with PettingZoo compatibility
 """
 
+import logging
+import sys
+
 __version__ = "0.1.0"
+
+logger = logging.getLogger("alphazoo")
+logger.addHandler(logging.StreamHandler(sys.stdout))
+logger.setLevel(logging.INFO)
 
 from .training.alphazoo import AlphaZoo
 from .training.gamer import Gamer

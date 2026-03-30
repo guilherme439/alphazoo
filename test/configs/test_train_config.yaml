@@ -1,20 +1,6 @@
-Initialization:
-  network_name: "test_network"
-  load_checkpoint: false
+verbose: true
 
-Scheduler:
-  starting_lr: 0.001
-  scheduler_boundaries: [100]
-  scheduler_gamma: 0.1
-
-Optimizer:
-  optimizer_choice: "Adam"
-  SGD:
-    weight_decay: 0.0001
-    momentum: 0.9
-    nesterov: true
-
-Running:
+running:
   running_mode: "sequential"
   num_groups: 1
   workers_per_group: 1
@@ -23,53 +9,54 @@ Running:
   early_softmax_moves: 100
   early_softmax_exploration: 1.0
   early_random_exploration: 0.0
-  Sequential:
+  sequential:
     num_games_per_type_per_step: 2
 
-Cache:
+cache:
   enabled: false
   max_size: 1000
 
-Saving:
-  save_frequency: 100
-  storage_frequency: 1
-  save_buffer: false
-
-Recurrent Options:
-  train_iterations: 1
-  pred_iterations: 1
-  test_iterations: 1
-  alpha: 1.0
-
-Testing:
-  asynchronous_testing: false
-  testing_actors: 1
-  early_testing: false
-  policy_test_frequency: 0
-  mcts_test_frequency: 0
-  num_policy_test_games: 0
-  num_mcts_test_games: 0
-  test_game_index: 0
-
-Plotting:
-  plot_frequency: 0
-  recent_steps_loss: 10
-  plot_loss: false
-  plot_weights: false
-
-Learning:
+learning:
   shared_storage_size: 3
   replay_window_size: 500
   learning_method: "epochs"
   value_loss: "SE"
   policy_loss: "KLD"
   normalize_cel: false
-  Epochs:
+  epochs:
     batch_size: 32
     learning_epochs: 1
-    plot_epochs: false
-  Samples:
+  samples:
     batch_size: 32
     num_samples: 100
     late_heavy: false
     with_replacement: true
+
+optimizer:
+  optimizer_choice: "Adam"
+  sgd:
+    weight_decay: 0.0001
+    momentum: 0.9
+    nesterov: true
+
+scheduler:
+  starting_lr: 0.001
+  boundaries: [100]
+  gamma: 0.1
+
+search:
+  simulation:
+    mcts_simulations: 8
+    keep_subtree: false
+  uct:
+    pb_c_base: 10000
+    pb_c_init: 1.15
+  exploration:
+    number_of_softmax_moves: 5
+    epsilon_softmax_exploration: 0.04
+    epsilon_random_exploration: 0.003
+    value_factor: 1.0
+    root_exploration_distribution: "dirichlet"
+    root_exploration_fraction: 0.25
+    root_dist_alpha: 0.3
+    root_dist_beta: 1.0

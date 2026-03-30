@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-import math
+import logging
 import os
+import pstats
 import resource
+import tempfile
 import time
 from copy import deepcopy
-from random import randrange
+from datetime import datetime
 from typing import Any, Callable
 
-import more_itertools
 import psutil
 import ray
 import torch
@@ -25,9 +26,11 @@ from ..utils.functions.loss_functions import (AbsoluteError, KLDivergence,
 from ..utils.remote_storage import RemoteStorage
 from .gamer_group import GamerGroup
 from .replay_buffer import ReplayBuffer
+from .network_trainer import LossFunction, NetworkTrainer
+
+logger = logging.getLogger("alphazoo")
 
 StepCallback = Callable[["AlphaZoo", int, dict[str, Any]], None]
-LossFunction = Callable[[Tensor, Tensor], Tensor]
 
 
 class AlphaZoo:
@@ -72,13 +75,15 @@ class AlphaZoo:
                 "Add recurrent=RecurrentConfig(...) to your AlphaZooConfig."
             )
 
-        self.latest_network = NetworkManager(model)
+        self.training_network_manager = NetworkManager(model)
+        self.selfplay_network_manager = NetworkManager(deepcopy(model), device="cpu")
+        
         self.optimizer = create_optimizer(
-            self.latest_network.get_model(),
-            optimizer_name, 
-            starting_lr, 
-            weight_decay, 
-            momentum, 
+            self.training_network_manager.get_model(),
+            optimizer_name,
+            starting_lr,
+            weight_decay,
+            momentum,
             nesterov
         )
         self.scheduler = MultiStepLR(self.optimizer, milestones=scheduler_boundaries, gamma=scheduler_gamma)
@@ -88,7 +93,12 @@ class AlphaZoo:
         if scheduler_state_dict is not None:
             self.scheduler.load_state_dict(scheduler_state_dict)
 
+        self.trainer = NetworkTrainer(self.training_network_manager, self.optimizer, self.scheduler)
+        
+
     def train(self, on_step_end: StepCallback | None = None) -> None:
+        logger.setLevel(logging.INFO if self.config.verbose else logging.WARNING)
+
         pid = os.getpid()
         process = psutil.Process(pid)
 
@@ -114,7 +124,6 @@ class AlphaZoo:
         cache_enabled = config.cache.enabled
         cache_max = config.cache.max_size
 
-
         if config.recurrent is not None:
             pred_iterations = config.recurrent.pred_iterations
             prog_alpha = config.recurrent.prog_alpha
@@ -127,10 +136,10 @@ class AlphaZoo:
         # dummy forward pass to initialize lazy layers
         obs = self.games[0].observe()
         dummy_state = self.games[0].obs_to_state(obs, None)
-        if self.latest_network.is_recurrent():
-            self.latest_network.recurrent_inference(dummy_state, False, iters_to_do=1)
+        if self.training_network_manager.is_recurrent():
+            self.training_network_manager.recurrent_inference(dummy_state, False, iters_to_do=1)
         else:
-            self.latest_network.inference(dummy_state, False)
+            self.training_network_manager.inference(dummy_state, False)
 
         # ------------- STORAGE AND BUFFERS SETUP -------------- #
 
@@ -139,9 +148,7 @@ class AlphaZoo:
         learning_method = config.learning.learning_method
 
         self.network_storage = RemoteStorage.remote(shared_storage_size)
-        self.latest_network.model_to_cpu()
-        ray.get(self.network_storage.store.remote(self.latest_network))
-        self.latest_network.model_to_device()
+        self._store_network()
 
         batch_size: int = 0
         if learning_method == "epochs":
@@ -184,24 +191,30 @@ class AlphaZoo:
 
         if running_mode == "sequential":
             self.games_per_step = num_games_per_type_per_step * self.num_game_types
-            print("\n\nRunning until training step number " + str(training_steps) +
-                  " with " + str(self.games_per_step) + " games in each step:")
+            logger.info("\n\nRunning until training step number " + str(training_steps) +
+                       " with " + str(self.games_per_step) + " games in each step:")
         elif running_mode == "asynchronous":
-            print("\n\nRunning until training step number " + str(training_steps) +
-                  " with " + str(update_delay) + "s of delay between each step:")
-                  
+            logger.info("\n\nRunning until training step number " + str(training_steps) +
+                       " with " + str(update_delay) + "s of delay between each step:")
+
         if early_fill_games_per_type > 0:
             total_early_fill = early_fill_games_per_type * self.num_game_types
-            print("-Playing " + str(total_early_fill) + " initial games to fill the replay buffer.")
+            logger.info("-Playing " + str(total_early_fill) + " initial games to fill the replay buffer.")
         if cache_enabled:
-            print("-Using cache for inference results.")
+            logger.info("-Using cache for inference results.")
+        if torch.cuda.is_available():
+            logger.info("-GPU: " + torch.cuda.get_device_name(0))
+        else:
+            logger.info("-GPU: not available, using CPU.")
         if self.starting_step != 0:
-            print("-Starting from iteration " + str(self.starting_step + 1) + ".\n")
+            logger.info("-Starting from iteration " + str(self.starting_step + 1) + ".\n")
 
-        print("\n\n--------------------------------\n")
+        logger.info("\n\n--------------------------------\n")
+
+        run_start = time.time()
 
         if early_fill_games_per_type > 0:
-            print("\n\n\n\nEarly Buffer Fill\n")
+            logger.info("\n\n\n\nEarly Buffer Fill\n")
             self.run_selfplay(
                 early_fill_games_per_type,
                 cache_enabled,
@@ -227,11 +240,13 @@ class AlphaZoo:
                 cache_enabled,
                 cache_max,
                 self.config.learning.player_dependent_value,
+                self.selfplay_network_manager,
             ) for _ in range(num_groups)]
             async_futures = [group.play_forever.remote() for group in async_groups]
 
         # ---- MAIN TRAINING LOOP ---- #
 
+        self._profile_bytes: list[bytes] = []
         self.train_global_value_loss: list[tuple[int, float]] = []
         self.train_global_policy_loss: list[tuple[int, float]] = []
         self.train_global_combined_loss: list[tuple[int, float]] = []
@@ -242,6 +257,7 @@ class AlphaZoo:
         steps_to_run = range(self.starting_step + 1, training_steps + 1)
         for step in steps_to_run:
             self.current_step = step
+            logger.info("\n\nStep " + str(step) + "/" + str(training_steps))
             step_start = time.time()
 
             if running_mode == "sequential":
@@ -254,7 +270,7 @@ class AlphaZoo:
             elif running_mode == "asynchronous":
                 self.wait_for_delay(update_delay)
 
-            print("\n\nLearning rate: " + str(self.scheduler.get_last_lr()[0]))
+            logger.info("\n\nLearning rate: " + str(self.scheduler.get_last_lr()[0]))
             trained = self.train_network(
                 learning_method,
                 policy_loss_function,
@@ -266,10 +282,8 @@ class AlphaZoo:
             )
 
             if trained:
-                self.latest_network.increment_version()
-                self.latest_network.model_to_cpu()
-                ray.get(self.network_storage.store.remote(self.latest_network))
-                self.latest_network.model_to_device()
+                self.training_network_manager.increment_version()
+                self._store_network()
 
             if running_mode == "asynchronous":
                 # FIXME: The entire stat-tracking shenanigans need to be simplified and improved
@@ -287,9 +301,9 @@ class AlphaZoo:
                 if cache_enabled:
                     avg_hit_ratio = sum(gd.get("cache_hit_ratio", 0) for gd in all_group_data) / len(all_group_data)
                     avg_cache_len = sum(gd.get("cache_length", 0) for gd in all_group_data) / len(all_group_data)
-                    print("Games: " + str(total_games) +
-                          " | Cache avg hit ratio: " + format(avg_hit_ratio, '.4') +
-                          " | avg len: " + format(avg_cache_len, '.6'))
+                    logger.info("Games: " + str(total_games) +
+                               " | Cache avg hit ratio: " + format(avg_hit_ratio, '.4') +
+                               " | avg len: " + format(avg_cache_len, '.6'))
 
             step_end = time.time()
 
@@ -315,16 +329,37 @@ class AlphaZoo:
 
             self.clear_metrics(metrics)
 
-            print("\n-------------------------------------\n\n")
+            logger.info("Step time(s): " + format(step_end - step_start, '.4'))
+            logger.info("\n-------------------------------------\n\n")
 
         if running_mode == "asynchronous":
-            print("Waiting for actors to finish their current games\n")
+            logger.info("Waiting for actors to finish their current games\n")
             for group in async_groups:
                 group.stop.remote()
             ray.get(async_futures)
             self._drain_record_queue()
 
-        print("All done.\nExiting")
+        if self._profile_bytes:
+            os.makedirs("profiling", exist_ok=True)
+            tmp_paths = []
+            for raw in self._profile_bytes:
+                tmp = tempfile.NamedTemporaryFile(suffix=".prof", delete=False)
+                tmp.write(raw)
+                tmp.close()
+                tmp_paths.append(tmp.name)
+
+            merged = pstats.Stats(tmp_paths[0])
+            for p in tmp_paths[1:]:
+                merged.add(p)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            merged.dump_stats(f"profiling/actor_profile_{timestamp}.prof")
+
+            for p in tmp_paths:
+                os.unlink(p)
+
+        total_run_time = time.time() - run_start
+        logger.info("Total run time: " + format(total_run_time / 60, '.4') + "m")
+        logger.info("All done.\nExiting")
 
     def run_selfplay(
         self,
@@ -371,6 +406,7 @@ class AlphaZoo:
                 cache_enabled,
                 cache_max,
                 self.config.learning.player_dependent_value,
+                self.selfplay_network_manager,
             ) for _ in range(num_groups)]
 
             base = num_games_per_type // num_groups
@@ -402,47 +438,19 @@ class AlphaZoo:
         if os.environ.get("ALPHAZOO_PROFILE"):
             profile_futures = [group.get_profile_stats.remote() for group in all_groups]
             profile_results = ray.get(profile_futures)
-            profile_bytes = [b for b in profile_results if b is not None]
-            if profile_bytes:
-                import pstats
-                import tempfile
-
-                os.makedirs("profiling", exist_ok=True)
-                tmp_paths = []
-                for raw in profile_bytes:
-                    tmp = tempfile.NamedTemporaryFile(suffix=".prof", delete=False)
-                    tmp.write(raw)
-                    tmp.close()
-                    tmp_paths.append(tmp.name)
-
-                merged = pstats.Stats(tmp_paths[0])
-                for p in tmp_paths[1:]:
-                    merged.add(p)
-                merged.dump_stats("profiling/actor_profile.prof")
-
-                for p in tmp_paths:
-                    os.unlink(p)
+            self._profile_bytes.extend(b for b in profile_results if b is not None)
 
         end = time.time()
         total_time = end - start
         if metrics is not None:
             metrics["episode_len_mean"] = total_moves / total_games
 
-        print("Games: " + str(total_games) +
-              " | Time(m): " + format(total_time / 60, '.4') +
-              " | Avg per game(s): " + format(total_time / total_games, '.4'))
+        logger.info("Games: " + str(total_games) +
+                    " | Time(m): " + format(total_time / 60, '.4') +
+                    " | Avg per game(s): " + format(total_time / total_games, '.4'))
 
-        print("Cache avg hit ratio: " + format(avg_hit_ratio, '.4') +
-              " | avg len: " + format(avg_cache_len, '.6'))
-
-    def _drain_record_queue(self) -> None:
-        while not self.record_queue.empty():
-            record, game_index = self.record_queue.get(block=False)
-            self.replay_buffer.save_game_record(record, game_index)
-
-    ##########################################################################
-    # ---------------------------    TRAINING    --------------------------- #
-    ##########################################################################
+        logger.info("Cache avg hit ratio: " + format(avg_hit_ratio, '.4') +
+                    " | avg len: " + format(avg_cache_len, '.6'))
 
     def train_network(
         self,
@@ -463,309 +471,50 @@ class AlphaZoo:
         replay_size: int = self.replay_buffer.len()
         n_games: int = self.replay_buffer.played_games()
 
-        print("\nReplay buffer: " + str(replay_size) + " positions, " + str(n_games) + " games.")
+        logger.info("\nReplay buffer: " + str(replay_size) + " positions, " + str(n_games) + " games.")
 
         if replay_size < batch_size:
-            print("Not enough data for training (need " + str(batch_size) + "). Skipping.")
+            logger.info("Not enough data for training (need " + str(batch_size) + "). Skipping.")
             return False
 
         if learning_method == "epochs":
-            self.train_with_epochs(batch_size, replay_size,
-                                   policy_loss_function, value_loss_function,
-                                   normalize_policy, train_iterations, prog_alpha,
-                                   use_progressive_loss)
+            epoch_losses = self.trainer.train_with_epochs(
+                self.replay_buffer, batch_size, replay_size,
+                policy_loss_function, value_loss_function,
+                normalize_policy, train_iterations, prog_alpha,
+                use_progressive_loss,
+                self.config.learning.epochs.learning_epochs)
+            for vl, pl, cl in epoch_losses:
+                self.train_global_value_loss.append((self.current_step, vl))
+                self.train_global_policy_loss.append((self.current_step, pl))
+                self.train_global_combined_loss.append((self.current_step, cl))
         elif learning_method == "samples":
-            self.train_with_samples(batch_size, replay_size,
-                                    policy_loss_function, value_loss_function,
-                                    normalize_policy, train_iterations, prog_alpha,
-                                    use_progressive_loss)
+            vl, pl, cl = self.trainer.train_with_samples(
+                self.replay_buffer, batch_size, replay_size,
+                policy_loss_function, value_loss_function,
+                normalize_policy, train_iterations, prog_alpha,
+                use_progressive_loss,
+                self.config.learning.samples.num_samples,
+                self.config.learning.samples.late_heavy,
+                self.config.learning.samples.with_replacement)
+            self.train_global_value_loss.append((self.current_step, vl))
+            self.train_global_policy_loss.append((self.current_step, pl))
+            self.train_global_combined_loss.append((self.current_step, cl))
         else:
             raise Exception("Bad learning_method config.")
 
         end = time.time()
-        print("Training time(s): " + format(end - start, '.4'))
+        logger.info("Training time(s): " + format(end - start, '.4'))
         return True
+    
+    def _store_network(self) -> None:
+        cpu_state_dict = self.training_network_manager.get_state_dict("cpu")
+        ray.get(self.network_storage.store.remote((cpu_state_dict, self.training_network_manager.get_version())))
 
-    def train_with_epochs(
-        self,
-        batch_size: int,
-        replay_size: int,
-        policy_loss_function: LossFunction,
-        value_loss_function: LossFunction,
-        normalize_policy: bool,
-        train_iterations: int,
-        prog_alpha: float,
-        use_progressive_loss: bool,
-    ) -> None:
-        learning_epochs = self.config.learning.epochs.learning_epochs
-
-        if batch_size > replay_size:
-            raise Exception(
-                "Batch size too large.\n"
-                "If you want to use batch_size with more moves than the first batch of games played "
-                "you need to use the \"early_fill\" config to fill the replay buffer with random games at the start.\n")
-
-        number_of_batches = replay_size // batch_size
-        print("Batches: " + str(number_of_batches) + " | Batch size: " + str(batch_size))
-
-        total_updates = learning_epochs * number_of_batches
-        print("Total updates: " + str(total_updates))
-
-        epoch_losses: list[tuple[int, float, float, float]] = []
-
-        for e in range(learning_epochs):
-            self.replay_buffer.shuffle()
-
-            epoch_value_loss = 0.0
-            epoch_policy_loss = 0.0
-            epoch_combined_loss = 0.0
-
-            for b in range(number_of_batches):
-                start_index = b * batch_size
-                next_index = (b + 1) * batch_size
-
-                batch = self.replay_buffer.get_slice(start_index, next_index)
-
-                value_loss, policy_loss, combined_loss = self.batch_update_weights(
-                    batch, policy_loss_function, value_loss_function,
-                    normalize_policy, train_iterations, prog_alpha, use_progressive_loss)
-
-                epoch_value_loss += value_loss
-                epoch_policy_loss += policy_loss
-                epoch_combined_loss += combined_loss
-
-            epoch_value_loss /= number_of_batches
-            epoch_policy_loss /= number_of_batches
-            epoch_combined_loss /= number_of_batches
-
-            epoch_losses.append((self.current_step, epoch_value_loss, epoch_policy_loss, epoch_combined_loss))
-
-            print("Epoch " + str(e + 1) + "/" + str(learning_epochs) + " done.")
-
-        for step, vl, pl, cl in epoch_losses:
-            self.train_global_value_loss.append((step, vl))
-            self.train_global_policy_loss.append((step, pl))
-            self.train_global_combined_loss.append((step, cl))
-
-    def train_with_samples(
-        self,
-        batch_size: int,
-        replay_size: int,
-        policy_loss_function: LossFunction,
-        value_loss_function: LossFunction,
-        normalize_policy: bool,
-        train_iterations: int,
-        prog_alpha: float,
-        use_progressive_loss: bool,
-    ) -> None:
-        num_samples = self.config.learning.samples.num_samples
-        late_heavy = self.config.learning.samples.late_heavy
-        replace = self.config.learning.samples.with_replacement
-
-        probs: list[float] = []
-        if late_heavy:
-            variation = 0.5
-            num_positions = replay_size
-            offset = (1 - variation) / 2
-            fraction = variation / num_positions
-
-            total = offset
-            for _ in range(num_positions):
-                total += fraction
-                probs.append(total)
-
-            total_sum = sum(probs)
-            probs = [p / total_sum for p in probs]
-
-        average_value_loss = 0.0
-        average_policy_loss = 0.0
-        average_combined_loss = 0.0
-
-        print("Total updates: " + str(num_samples))
-
-        for _ in range(num_samples):
-            batch = self.replay_buffer.get_sample(batch_size, replace, probs)
-
-            value_loss, policy_loss, combined_loss = self.batch_update_weights(
-                batch, policy_loss_function, value_loss_function,
-                normalize_policy, train_iterations, prog_alpha, use_progressive_loss)
-
-            average_value_loss += value_loss
-            average_policy_loss += policy_loss
-            average_combined_loss += combined_loss
-
-        average_value_loss /= num_samples
-        average_policy_loss /= num_samples
-        average_combined_loss /= num_samples
-
-        self.train_global_value_loss.append((self.current_step, average_value_loss))
-        self.train_global_policy_loss.append((self.current_step, average_policy_loss))
-        self.train_global_combined_loss.append((self.current_step, average_combined_loss))
-
-    def batch_update_weights(
-        self,
-        batch: list[Any],
-        policy_loss_function: LossFunction,
-        value_loss_function: LossFunction,
-        normalize_policy: bool,
-        train_iterations: int,
-        alpha: float,
-        use_progressive_loss: bool,
-    ) -> tuple[float, float, float]:
-        self.latest_network.get_model().train()
-        self.optimizer.zero_grad()
-
-        value_loss: Tensor | float = 0.0
-        policy_loss: Tensor | float = 0.0
-        combined_loss: Tensor | float = 0.0
-
-        if self.latest_network.is_recurrent():
-            value_loss, policy_loss, combined_loss = self._recurrent_batch_update(
-                batch, policy_loss_function, value_loss_function,
-                normalize_policy, train_iterations, alpha, use_progressive_loss)
-        else:
-            value_loss, policy_loss, combined_loss = self._standard_batch_update(
-                batch, policy_loss_function, value_loss_function, normalize_policy)
-
-        loss = combined_loss
-
-        loss.backward()  # type: ignore[union-attr]
-        self.optimizer.step()
-        self.scheduler.step()
-
-        return value_loss.item(), policy_loss.item(), combined_loss.item()  # type: ignore[union-attr]
-
-    def _standard_batch_update(
-        self,
-        batch: list[Any],
-        policy_loss_function: LossFunction,
-        value_loss_function: LossFunction,
-        normalize_policy: bool,
-    ) -> tuple[Tensor, Tensor, Tensor]:
-        states, targets, indexes = list(zip(*batch))
-        batch_input = torch.cat(states, 0)
-        batch_size = len(indexes)
-        outputs = self.latest_network.inference(batch_input, True)
-        return self.calculate_loss(
-            outputs, targets, batch_size,
-            policy_loss_function, value_loss_function, normalize_policy)
-
-    def _recurrent_batch_update(
-        self,
-        batch: list[Any],
-        policy_loss_function: LossFunction,
-        value_loss_function: LossFunction,
-        normalize_policy: bool,
-        train_iterations: int,
-        alpha: float,
-        use_progressive_loss: bool,
-    ) -> tuple[Tensor | float, Tensor | float, Tensor | float]:
-        value_loss: Tensor | float = 0.0
-        policy_loss: Tensor | float = 0.0
-        combined_loss: Tensor | float = 0.0
-
-        data_by_game = more_itertools.bucket(batch, key=lambda x: x[2])
-        for index in sorted(data_by_game):
-            batch_data = list(data_by_game[index])
-            batch_size = len(batch_data)
-
-            states, targets, indexes = list(zip(*batch_data))
-            batch_input = torch.cat(states, 0)
-            recurrent_iterations = train_iterations
-
-            if use_progressive_loss:
-                total_value_loss: Tensor | float = 0.0
-                total_policy_loss: Tensor | float = 0.0
-                total_combined_loss: Tensor | float = 0.0
-                prog_value_loss: Tensor | float = 0.0
-                prog_policy_loss: Tensor | float = 0.0
-                prog_combined_loss: Tensor | float = 0.0
-
-                if alpha != 1:
-                    outputs, _ = self.latest_network.recurrent_inference(batch_input, True, recurrent_iterations)
-                    total_value_loss, total_policy_loss, total_combined_loss = self.calculate_loss(
-                        outputs, targets, batch_size,
-                        policy_loss_function, value_loss_function, normalize_policy)
-
-                if alpha != 0:
-                    outputs = self.get_output_for_prog_loss(batch_input, recurrent_iterations)
-                    prog_value_loss, prog_policy_loss, prog_combined_loss = self.calculate_loss(
-                        outputs, targets, batch_size,
-                        policy_loss_function, value_loss_function, normalize_policy)
-
-                value_loss = (1 - alpha) * total_value_loss + alpha * prog_value_loss
-                policy_loss = (1 - alpha) * total_policy_loss + alpha * prog_policy_loss
-                combined_loss = (1 - alpha) * total_combined_loss + alpha * prog_combined_loss
-            else:
-                outputs, _ = self.latest_network.recurrent_inference(batch_input, True, recurrent_iterations)
-                value_loss, policy_loss, combined_loss = self.calculate_loss(
-                    outputs, targets, batch_size,
-                    policy_loss_function, value_loss_function, normalize_policy)
-
-        return value_loss, policy_loss, combined_loss
-
-    def calculate_loss(
-        self,
-        outputs: tuple[Tensor, Tensor],
-        targets: tuple[Any, ...],
-        batch_size: int,
-        policy_loss_function: LossFunction,
-        value_loss_function: LossFunction,
-        normalize_policy: bool,
-    ) -> tuple[Tensor, Tensor, Tensor]:
-        target_values, target_policies = list(zip(*targets))
-
-        predicted_policies, predicted_values = outputs
-
-        policy_loss: Tensor | float = 0.0
-        value_loss: Tensor | float = 0.0
-
-        for i in range(batch_size):
-            target_policy = torch.tensor(target_policies[i]).to(self.latest_network.device)
-            target_value = torch.tensor(target_values[i]).to(self.latest_network.device)
-
-            predicted_value = predicted_values[i]
-            predicted_policy = predicted_policies[i]
-            predicted_policy = torch.flatten(predicted_policy)
-
-            policy_loss += policy_loss_function(predicted_policy, target_policy)
-            value_loss += value_loss_function(predicted_value, target_value)
-
-        target_size = len(targets)
-        if normalize_policy:
-            policy_loss /= math.log(target_size)
-
-        value_loss /= batch_size
-        policy_loss /= batch_size
-
-        combined_loss = policy_loss + value_loss
-
-        invalid_loss = False
-        if torch.any(torch.isnan(value_loss)):
-            print("\nValue Loss is nan.")
-            invalid_loss = True
-        if torch.any(torch.isnan(policy_loss)):
-            print("\nPolicy Loss is nan.")
-            invalid_loss = True
-        if invalid_loss:
-            print(predicted_values)
-            print(predicted_policies)
-            raise Exception("Nan value found when calculating loss.")
-
-        return value_loss, policy_loss, combined_loss  # type: ignore[return-value]
-
-    def get_output_for_prog_loss(self, inputs: Tensor, max_iters: int) -> tuple[Tensor, Tensor]:
-        n = randrange(0, max_iters)
-        k = randrange(1, max_iters - n + 1)
-
-        if n > 0:
-            _, interim_thought = self.latest_network.recurrent_inference(inputs, True, iters_to_do=n)
-            interim_thought = interim_thought.detach()
-        else:
-            interim_thought = None
-
-        outputs, _ = self.latest_network.recurrent_inference(inputs, True, iters_to_do=k, interim_thought=interim_thought)
-        return outputs
+    def _drain_record_queue(self) -> None:
+        while not self.record_queue.empty():
+            record, game_index = self.record_queue.get(block=False)
+            self.replay_buffer.save_game_record(record, game_index)
 
     ##########################################################################
     # ---------------------------    UTILITY    ---------------------------- #
@@ -785,7 +534,7 @@ class AlphaZoo:
         small_rest = delay_period_seconds / divisions
         for i in range(divisions):
             time.sleep(small_rest)
-        print("\nDelay of " + format(delay_period_seconds, '.1f') + "s completed.\n")
+        logger.info("Delay of " + format(delay_period_seconds, '.1f') + "s completed.")
 
     def clear_metrics(self, m: dict[str, Any]) -> None:
         m["step"] = 0
@@ -797,4 +546,3 @@ class AlphaZoo:
         m["learning_rate"] = 0.0
         m["step_time"] = 0.0
         m["loss_history"] = {"value": [], "policy": [], "combined": []}
-

@@ -8,15 +8,15 @@ from .interfaces import AlphaZooNet, AlphaZooRecurrentNet
 
 class NetworkManager:
 
-    def __init__(self, model: AlphaZooNet | AlphaZooRecurrentNet) -> None:
+    def __init__(self, model: AlphaZooNet | AlphaZooRecurrentNet, device: str | None = None) -> None:
         if not isinstance(model, (AlphaZooNet, AlphaZooRecurrentNet)):
             raise TypeError(
                 "model must be an instance of AlphaZooNet or AlphaZooRecurrentNet. "
                 "See alphazoo.networks for the available base classes."
             )
-        self.model = model
+        self.device: str = device or self._auto_device()
+        self.model = model.to(self.device)
         self._version: int = 0
-        self.check_devices()
 
     def get_version(self) -> int:
         return self._version
@@ -29,20 +29,6 @@ class NetworkManager:
 
     def get_model(self) -> AlphaZooNet | AlphaZooRecurrentNet:
         return self.model
-
-    def model_to_cpu(self) -> None:
-        self.model = self.model.to('cpu')
-
-    def model_to_device(self) -> None:
-        self.model = self.model.to(self.device)
-
-    @staticmethod
-    def cuda_is_available() -> bool:
-        return torch.cuda.is_available()
-
-    def check_devices(self) -> None:
-        self.device: str = "cuda" if torch.cuda.is_available() else "cpu"
-        self.model = self.model.to(self.device)
 
     def inference(self, state: Tensor, training: bool) -> tuple[Tensor, Tensor]:
         if not training:
@@ -71,3 +57,14 @@ class NetworkManager:
             with torch.no_grad():
                 return self.model(state, iters_to_do, interim_thought)  # type: ignore[call-arg]
         return self.model(state, iters_to_do, interim_thought)  # type: ignore[call-arg]
+    
+    def get_state_dict(self, device: str) -> dict:
+        return {k: v.to(device) for k, v in self.model.state_dict().items()}
+
+    def load_state_dict(self, state_dict: dict) -> None:
+        self.model.load_state_dict(state_dict)
+
+    def _auto_device(self) -> str :
+        return "cuda" if torch.cuda.is_available() else "cpu"
+
+    
