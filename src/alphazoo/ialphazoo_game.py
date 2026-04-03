@@ -58,7 +58,7 @@ class IAlphazooGame(ABC):
         ...
 
     # ------------------------------------------------------------------
-    # State queries
+    # Game state queries
     # ------------------------------------------------------------------
 
     @abstractmethod
@@ -91,14 +91,10 @@ class IAlphazooGame(ABC):
         ...
 
     @abstractmethod
-    def get_num_actions(self) -> int:
-        """Return the total size of the flat action space."""
-        ...
-
-    @abstractmethod
     def get_length(self) -> int:
         """Return the number of moves played so far in the current game."""
         ...
+
 
     # ------------------------------------------------------------------
     # Observation interface
@@ -119,8 +115,27 @@ class IAlphazooGame(ABC):
         """
         Extract the action mask from a raw observation dict.
 
-        Returns a float32 array of shape ``(get_num_actions(),)``.
+        Returns a float32 array of shape ``(get_action_size(),)``.
         1.0 = legal, 0.0 = illegal.
         """
         ...
 
+    @abstractmethod
+    def get_action_shape(self) -> tuple[int, ...]:
+        """Return the shape of the action space."""
+        ...
+    
+    @abstractmethod
+    def get_action_size(self) -> int:
+        """Return the total size of the flattened action space."""
+        ...
+
+    @abstractmethod
+    def get_state_shape(self) -> tuple[int, ...]:
+        """Return the shape of the network input state tensor."""
+        ...
+
+    @abstractmethod
+    def get_state_size(self) -> int:
+        """Return the total number of elements in the flattened state tensor."""
+        ...

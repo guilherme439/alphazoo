@@ -20,11 +20,11 @@ from torch.optim.lr_scheduler import MultiStepLR
 from ..configs.alphazoo_config import AlphaZooConfig
 from ..networks.interfaces import AlphaZooNet, AlphaZooRecurrentNet
 from ..networks.network_manager import NetworkManager
+from ..inference.inference_server import InferenceServer
 from ..utils.functions.general_utils import create_optimizer
 from ..utils.functions.loss_functions import (AbsoluteError, KLDivergence,
                                               MSError, SquaredError)
-from ..utils.remote_storage import RemoteStorage
-from .gamer_group import GamerGroup
+from .gamer import Gamer
 from .replay_buffer import ReplayBuffer
 from .network_trainer import LossFunction, NetworkTrainer
 
@@ -75,9 +75,9 @@ class AlphaZoo:
                 "Add recurrent=RecurrentConfig(...) to your AlphaZooConfig."
             )
 
+        self.model = model
         self.training_network_manager = NetworkManager(model)
-        self.selfplay_network_manager = NetworkManager(deepcopy(model), device="cpu")
-        
+
         self.optimizer = create_optimizer(
             self.training_network_manager.get_model(),
             optimizer_name,
@@ -94,7 +94,7 @@ class AlphaZoo:
             self.scheduler.load_state_dict(scheduler_state_dict)
 
         self.trainer = NetworkTrainer(self.training_network_manager, self.optimizer, self.scheduler)
-        
+
 
     def train(self, on_step_end: StepCallback | None = None) -> None:
         logger.setLevel(logging.INFO if self.config.verbose else logging.WARNING)
@@ -106,8 +106,7 @@ class AlphaZoo:
         self.current_step = self.starting_step
 
         running_mode = config.running.running_mode
-        num_groups = config.running.num_groups
-        workers_per_group = config.running.workers_per_group
+        num_gamers = config.running.num_gamers
         early_fill_games_per_type = config.running.early_fill_per_type
         training_steps = int(config.running.training_steps)
         self.num_game_types = len(self.games)
@@ -141,14 +140,33 @@ class AlphaZoo:
         else:
             self.training_network_manager.inference(dummy_state, False)
 
-        # ------------- STORAGE AND BUFFERS SETUP -------------- #
+        # ------------- INFERENCE SERVER SETUP -------------- #
 
-        shared_storage_size = config.learning.shared_storage_size
+        state_shape = self.games[0].get_state_shape()
+        state_size = self.games[0].get_state_size()
+        action_size = self.games[0].get_action_size()
+        is_recurrent = self.training_network_manager.is_recurrent()
+        total_clients = num_gamers * self.num_game_types
+
+        cpu_network_manager = NetworkManager(deepcopy(self.model), device="cpu")
+        self.inference_server = InferenceServer.remote(
+            cpu_network_manager,
+            cache_enabled,
+            cache_max,
+            total_clients,
+            state_size,
+            state_shape,
+            action_size,
+            is_recurrent,
+            pred_iterations,
+        )
+        self._inference_clients = ray.get(self.inference_server.get_clients.remote())
+        self._server_future = self.inference_server.run.remote()
+
+        # ------------- BUFFERS SETUP -------------- #
+
         replay_window_size = config.learning.replay_window_size
         learning_method = config.learning.learning_method
-
-        self.network_storage = RemoteStorage.remote(shared_storage_size)
-        self._store_network()
 
         batch_size: int = 0
         if learning_method == "epochs":
@@ -217,32 +235,27 @@ class AlphaZoo:
             logger.info("\n\n\n\nEarly Buffer Fill\n")
             self.run_selfplay(
                 early_fill_games_per_type,
-                cache_enabled,
-                cache_max=cache_max,
                 early_fill=True
             )
 
         # ---- ASYNC MODE SETUP ---- #
 
-        async_groups: list[Any] = []
+        async_gamers: list[Any] = []
         async_futures: list[Any] = []
         if running_mode == "asynchronous":
             game = self.games[0]
             async_search_config = deepcopy(self.config.search)
-            async_groups = [GamerGroup.remote(
+            clients = self._inference_clients[:num_gamers]
+            async_gamers = [Gamer.remote(
                 self.record_queue,
-                self.network_storage,
-                game,
+                deepcopy(game),
                 0,
                 async_search_config,
                 pred_iterations,
-                workers_per_group,
-                cache_enabled,
-                cache_max,
                 self.config.learning.player_dependent_value,
-                self.selfplay_network_manager,
-            ) for _ in range(num_groups)]
-            async_futures = [group.play_forever.remote() for group in async_groups]
+                clients[i],
+            ) for i in range(num_gamers)]
+            async_futures = [gamer.play_forever.remote() for gamer in async_gamers]
 
         # ---- MAIN TRAINING LOOP ---- #
 
@@ -263,8 +276,6 @@ class AlphaZoo:
             if running_mode == "sequential":
                 self.run_selfplay(
                     num_games_per_type_per_step,
-                    cache_enabled,
-                    cache_max=cache_max,
                     metrics=metrics
                 )
             elif running_mode == "asynchronous":
@@ -281,29 +292,19 @@ class AlphaZoo:
                 batch_size
             )
 
-            if trained:
-                self.training_network_manager.increment_version()
-                self._store_network()
-
             if running_mode == "asynchronous":
-                # FIXME: The entire stat-tracking shenanigans need to be simplified and improved
-                stats_futures = [g.get_accumulated_stats.remote() for g in async_groups]
-                all_group_data = ray.get(stats_futures)
+                self._drain_record_queue()
                 total_moves = 0
-                total_games = 0
-                for group_data in all_group_data:
-                    for s in group_data["game_stats"]:
-                        total_moves += s["number_of_moves"]
-                        total_games += 1
-                if total_games > 0:
-                    metrics["episode_len_mean"] = total_moves / total_games
+                total_games = self.replay_buffer.played_games()
 
                 if cache_enabled:
-                    avg_hit_ratio = sum(gd.get("cache_hit_ratio", 0) for gd in all_group_data) / len(all_group_data)
-                    avg_cache_len = sum(gd.get("cache_length", 0) for gd in all_group_data) / len(all_group_data)
-                    logger.info("Games: " + str(total_games) +
-                               " | Cache avg hit ratio: " + format(avg_hit_ratio, '.4') +
-                               " | avg len: " + format(avg_cache_len, '.6'))
+                    cache_stats = ray.get(self.inference_server.get_cache_stats.remote())
+                    logger.info("Cache hit ratio: " + format(cache_stats["hit_ratio"], '.4') +
+                               " | len: " + format(cache_stats["length"], '.6'))
+
+            if trained:
+                self.training_network_manager.increment_version()
+                self._publish_model()
 
             step_end = time.time()
 
@@ -333,14 +334,18 @@ class AlphaZoo:
             logger.info("\n-------------------------------------\n\n")
 
         if running_mode == "asynchronous":
-            logger.info("Waiting for actors to finish their current games\n")
-            for group in async_groups:
-                group.stop.remote()
+            logger.info("Waiting for gamers to finish their current games\n")
+            for gamer in async_gamers:
+                gamer.stop.remote()
             ray.get(async_futures)
             self._drain_record_queue()
 
+        self.inference_server.stop.remote()
+        ray.get(self._server_future)
+
         if self._profile_bytes:
-            os.makedirs("profiling", exist_ok=True)
+            profile_dir = os.environ.get("ALPHAZOO_PROFILE_DIR", "profiling")
+            os.makedirs(profile_dir, exist_ok=True)
             tmp_paths = []
             for raw in self._profile_bytes:
                 tmp = tempfile.NamedTemporaryFile(suffix=".prof", delete=False)
@@ -351,8 +356,7 @@ class AlphaZoo:
             merged = pstats.Stats(tmp_paths[0])
             for p in tmp_paths[1:]:
                 merged.add(p)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            merged.dump_stats(f"profiling/actor_profile_{timestamp}.prof")
+            merged.dump_stats(os.path.join(profile_dir, "actor_profile.prof"))
 
             for p in tmp_paths:
                 os.unlink(p)
@@ -364,8 +368,6 @@ class AlphaZoo:
     def run_selfplay(
         self,
         num_games_per_type: int,
-        cache_enabled: bool,
-        cache_max: int = 8000,
         early_fill: bool = False,
         metrics: dict[str, Any] | None = None,
     ) -> None:
@@ -373,8 +375,8 @@ class AlphaZoo:
 
         recurrent_config = self.config.recurrent
         pred_iterations = recurrent_config.pred_iterations if recurrent_config is not None else 1
-        num_groups = self.config.running.num_groups
-        workers_per_group = self.config.running.workers_per_group
+        num_gamers = self.config.running.num_gamers
+        is_recurrent = self.training_network_manager.is_recurrent()
 
         search_config = deepcopy(self.config.search)
         if early_fill:
@@ -384,38 +386,39 @@ class AlphaZoo:
 
         total_games = self.num_game_types * num_games_per_type
         total_moves: int = 0
-        all_groups: list[Any] = []
+        all_gamers: list[Any] = []
 
         profiling = os.environ.get("ALPHAZOO_PROFILE")
-        if profiling:
-            group_cls = GamerGroup.options(
-                runtime_env={"env_vars": {"ALPHAZOO_PROFILE": profiling}}
-            )
-        else:
-            group_cls = GamerGroup
 
+        client_offset = 0
         for i, game in enumerate(self.games):
-            groups = [group_cls.remote(
+            clients = self._inference_clients[client_offset:client_offset + num_gamers]
+            client_offset += num_gamers
+
+            if profiling:
+                gamer_cls = Gamer.options(
+                    runtime_env={"env_vars": {"ALPHAZOO_PROFILE": profiling}}
+                )
+            else:
+                gamer_cls = Gamer
+
+            gamers = [gamer_cls.remote(
                 self.record_queue,
-                self.network_storage,
-                game,
+                deepcopy(game),
                 i,
                 search_config,
                 pred_iterations,
-                workers_per_group,
-                cache_enabled,
-                cache_max,
                 self.config.learning.player_dependent_value,
-                self.selfplay_network_manager,
-            ) for _ in range(num_groups)]
+                clients[j],
+            ) for j in range(num_gamers)]
 
-            base = num_games_per_type // num_groups
-            remainder = num_games_per_type % num_groups
-            games_per_group = [base + (1 if g < remainder else 0) for g in range(num_groups)]
+            base = num_games_per_type // num_gamers
+            remainder = num_games_per_type % num_gamers
+            games_per_gamer = [base + (1 if g < remainder else 0) for g in range(num_gamers)]
 
             play_futures = [
-                group.play_games.remote(n)
-                for group, n in zip(groups, games_per_group)
+                gamer.play_games.remote(n)
+                for gamer, n in zip(gamers, games_per_gamer)
                 if n > 0
             ]
             all_stats_lists = ray.get(play_futures)
@@ -424,19 +427,14 @@ class AlphaZoo:
                 for stats in stats_list:
                     total_moves += stats["number_of_moves"]
 
-            all_groups.extend(groups)
+            all_gamers.extend(gamers)
 
-            if cache_enabled:
-                cache_futures = [group.get_cache_stats.remote() for group in groups]
-                cache_stats_list = ray.get(cache_futures)
-                avg_hit_ratio = sum(cs["hit_ratio"] for cs in cache_stats_list) / len(cache_stats_list)
-                avg_cache_len = sum(cs["length"] for cs in cache_stats_list) / len(cache_stats_list)
-            else:
-                avg_hit_ratio = 0.0
-                avg_cache_len = 0.0
+        cache_stats = ray.get(self.inference_server.get_cache_stats.remote())
+        avg_hit_ratio = cache_stats["hit_ratio"]
+        avg_cache_len = cache_stats["length"]
 
-        if os.environ.get("ALPHAZOO_PROFILE"):
-            profile_futures = [group.get_profile_stats.remote() for group in all_groups]
+        if profiling:
+            profile_futures = [gamer.get_profile_stats.remote() for gamer in all_gamers]
             profile_results = ray.get(profile_futures)
             self._profile_bytes.extend(b for b in profile_results if b is not None)
 
@@ -506,10 +504,12 @@ class AlphaZoo:
         end = time.time()
         logger.info("Training time(s): " + format(end - start, '.4'))
         return True
-    
-    def _store_network(self) -> None:
+
+    def _publish_model(self) -> None:
         cpu_state_dict = self.training_network_manager.get_state_dict("cpu")
-        ray.get(self.network_storage.store.remote((cpu_state_dict, self.training_network_manager.get_version())))
+        ray.get(self.inference_server.publish_model.remote(
+            cpu_state_dict, self.training_network_manager.get_version()
+        ))
 
     def _drain_record_queue(self) -> None:
         while not self.record_queue.empty():

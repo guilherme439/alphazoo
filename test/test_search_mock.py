@@ -9,7 +9,7 @@ import os
 from alphazoo.search.node import Node
 from alphazoo.search.explorer import Explorer
 from alphazoo.configs import SearchConfig
-from .utils.mocks import MockGame, MockNet, MockNetworkManager
+from .utils.mocks import MockGame, MockNet, MockInferenceClient
 
 
 @pytest.fixture
@@ -64,34 +64,34 @@ class TestNode:
 class TestEvaluate:
     def test_respects_action_mask(self, search_config):
         explorer = Explorer(search_config, training=False)
-        explorer.network_manager = MockNetworkManager(MockNet(num_actions=4))
+        explorer.inference_client = MockInferenceClient(MockNet(num_actions=4))
         explorer.recurrent_iterations = 2
 
         game = MockGame(num_actions=4, action_mask=[1.0, 0.0, 1.0, 0.0])
         node = Node(0)
-        explorer.evaluate(node, game, cache=None)
+        explorer.evaluate(node, game)
 
         assert set(node.children.keys()) == {0, 2}
 
     def test_sets_to_play(self, search_config):
         explorer = Explorer(search_config, training=False)
-        explorer.network_manager = MockNetworkManager(MockNet())
+        explorer.inference_client = MockInferenceClient(MockNet())
         explorer.recurrent_iterations = 2
 
         game = MockGame()
         node = Node(0)
-        explorer.evaluate(node, game, cache=None)
+        explorer.evaluate(node, game)
 
         assert node.to_play == 1
 
     def test_terminal_returns_value_without_expanding(self, search_config):
         explorer = Explorer(search_config, training=False)
-        explorer.network_manager = MockNetworkManager(MockNet())
+        explorer.inference_client = MockInferenceClient(MockNet())
         explorer.recurrent_iterations = 2
 
         game = MockGame(max_depth=0)
         node = Node(0)
-        value = explorer.evaluate(node, game, cache=None)
+        value = explorer.evaluate(node, game)
 
         assert value == 1.0
         assert node.terminal_value == 1.0
@@ -99,22 +99,22 @@ class TestEvaluate:
 
     def test_priors_sum_to_one(self, search_config):
         explorer = Explorer(search_config, training=False)
-        explorer.network_manager = MockNetworkManager(MockNet())
+        explorer.inference_client = MockInferenceClient(MockNet())
         explorer.recurrent_iterations = 2
 
         node = Node(0)
-        explorer.evaluate(node, MockGame(), cache=None)
+        explorer.evaluate(node, MockGame())
 
         prior_sum = sum(c.prior for c in node.children.values())
         assert prior_sum == pytest.approx(1.0, abs=1e-5)
 
     def test_biased_policy_produces_biased_priors(self, search_config):
         explorer = Explorer(search_config, training=False)
-        explorer.network_manager = MockNetworkManager(MockNet(fixed_policy=[10.0, -10.0, -10.0, -10.0]))
+        explorer.inference_client = MockInferenceClient(MockNet(fixed_policy=[10.0, -10.0, -10.0, -10.0]))
         explorer.recurrent_iterations = 2
 
         node = Node(0)
-        explorer.evaluate(node, MockGame(), cache=None)
+        explorer.evaluate(node, MockGame())
 
         assert node.children[0].prior > 0.99
 
@@ -202,26 +202,26 @@ class TestSelectChild:
 class TestRunMCTS:
     def test_returns_valid_action(self, search_config):
         explorer = Explorer(search_config, training=False)
-        action, _, _ = explorer.run_mcts(MockGame(), MockNetworkManager(MockNet()), Node(0))
+        action, _, _ = explorer.run_mcts(MockGame(), MockInferenceClient(MockNet()), Node(0))
         assert 0 <= action < 4
 
     def test_respects_action_mask(self, search_config):
         explorer = Explorer(search_config, training=False)
         game = MockGame(action_mask=[0.0, 1.0, 0.0, 1.0])
-        action, _, _ = explorer.run_mcts(game, MockNetworkManager(MockNet()), Node(0))
+        action, _, _ = explorer.run_mcts(game, MockInferenceClient(MockNet()), Node(0))
         assert action in {1, 3}
 
     def test_root_visits_equal_simulations(self, search_config):
         explorer = Explorer(search_config, training=False)
         root = Node(0)
-        explorer.run_mcts(MockGame(), MockNetworkManager(MockNet()), root)
+        explorer.run_mcts(MockGame(), MockInferenceClient(MockNet()), root)
         assert root.visit_count == search_config.simulation.mcts_simulations
 
     def test_preferred_action_gets_most_visits(self, search_config):
         explorer = Explorer(search_config, training=False)
-        net = MockNetworkManager(MockNet(fixed_policy=[100.0, -100.0, -100.0, -100.0]))
+        client = MockInferenceClient(MockNet(fixed_policy=[100.0, -100.0, -100.0, -100.0]))
         root = Node(0)
-        explorer.run_mcts(MockGame(), net, root)
+        explorer.run_mcts(MockGame(), client, root)
 
         visits = {a: c.visit_count for a, c in root.children.items()}
         assert visits[0] == max(visits.values())
@@ -232,7 +232,7 @@ class TestRunMCTS:
         depth_before = game._depth
         player_before = game._player
 
-        explorer.run_mcts(game, MockNetworkManager(MockNet()), Node(0))
+        explorer.run_mcts(game, MockInferenceClient(MockNet()), Node(0))
 
         assert game._depth == depth_before
         assert game._player == player_before
@@ -240,22 +240,22 @@ class TestRunMCTS:
     def test_single_valid_action(self, search_config):
         explorer = Explorer(search_config, training=False)
         game = MockGame(action_mask=[0.0, 0.0, 1.0, 0.0])
-        action, _, _ = explorer.run_mcts(game, MockNetworkManager(MockNet()), Node(0))
+        action, _, _ = explorer.run_mcts(game, MockInferenceClient(MockNet()), Node(0))
         assert action == 2
 
     def test_training_mode_adds_noise_to_expanded_root(self, search_config):
         """Noise is applied to existing children, so pass a pre-expanded root."""
         np.random.seed(42)
         explorer = Explorer(search_config, training=True)
-        network = MockNetworkManager(MockNet())
+        client = MockInferenceClient(MockNet())
 
         # First run expands the root
         root = Node(0)
-        explorer.run_mcts(MockGame(), network, root)
+        explorer.run_mcts(MockGame(), client, root)
         priors_before = {a: c.prior for a, c in root.children.items()}
 
         # Second run reuses the expanded root — noise modifies the priors
-        explorer.run_mcts(MockGame(), network, root)
+        explorer.run_mcts(MockGame(), client, root)
         priors_after = {a: c.prior for a, c in root.children.items()}
 
         changed = any(

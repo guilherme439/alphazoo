@@ -1,4 +1,5 @@
 import os
+import time
 from datetime import datetime
 
 import pytest
@@ -45,6 +46,12 @@ def test_profiling_connect_four() -> None:
     )
     config = AlphaZooConfig.from_yaml(config_path)
     model = ConnectFourNet()
+    training_steps = config.running.training_steps
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = os.path.join("profiling", timestamp)
+    os.makedirs(run_dir, exist_ok=True)
+    os.environ["ALPHAZOO_PROFILE_DIR"] = run_dir
 
     trainer = AlphaZoo(
         env=connect_four_v3.env(),
@@ -55,20 +62,29 @@ def test_profiling_connect_four() -> None:
     yappi.set_clock_type("wall")
     yappi.start()
 
+    start = time.time()
     trainer.train()
+    total_time = time.time() - start
 
     yappi.stop()
 
-    os.makedirs("profiling", exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    main_prof = f"profiling/main_profile_{timestamp}.prof"
-    actor_prof = f"profiling/actor_profile_{timestamp}.prof"
+    main_prof = os.path.join(run_dir, "main_profile.prof")
+    actor_prof = os.path.join(run_dir, "actor_profile.prof")
     yappi.get_func_stats().save(main_prof, type="pstat")
 
-    del os.environ["ALPHAZOO_PROFILE"]
+    avg_step_time = total_time / training_steps
+    summary_path = os.path.join(run_dir, "summary.txt")
+    with open(summary_path, "w") as f:
+        f.write(f"Total run time:       {total_time:.2f}s ({total_time / 60:.2f}m)\n")
+        f.write(f"Training steps:       {training_steps}\n")
+        f.write(f"Avg time per step:    {avg_step_time:.2f}s\n")
 
-    print("\n\nProfiling complete.")
-    print(f"  Main process: {main_prof}")
-    print(f"  Actor stats:  {actor_prof}")
+    del os.environ["ALPHAZOO_PROFILE"]
+    del os.environ["ALPHAZOO_PROFILE_DIR"]
+
+    print(f"\n\nProfiling complete. Results in: {run_dir}/")
+    print(f"  Main profile: {main_prof}")
+    print(f"  Actor profile: {actor_prof}")
+    print(f"  Summary: {summary_path}")
     print(f"\nView with: snakeviz {main_prof}")
     print(f"           snakeviz {actor_prof}")

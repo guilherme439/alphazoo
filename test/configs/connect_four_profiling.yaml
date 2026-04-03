@@ -1,22 +1,22 @@
 verbose: true
 
 running:
-  running_mode: "sequential"
+  running_mode: "asynchronous"
   training_steps: 100
-  num_groups: 2
-  workers_per_group: 3
+  num_gamers: 8
   early_fill_per_type: 0
   early_softmax_moves: 0
   early_softmax_exploration: 0.5
   early_random_exploration: 0.5
-  sequential:
-    num_games_per_type_per_step: 12
+  asynchronous:
+    update_delay: 5
+  # sequential:
+  #   num_games_per_type_per_step: 2
 cache:
   enabled: true
   max_size: 8000
 learning:
   player_dependent_value: true
-  shared_storage_size: 1
   replay_window_size: 6000
   learning_method: "samples"
   value_loss: "SE"

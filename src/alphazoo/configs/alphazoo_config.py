@@ -58,8 +58,7 @@ class CacheConfig:
 @dataclass
 class RunningConfig:
     running_mode: Literal["sequential", "asynchronous"] = "sequential"
-    num_groups: int = 1
-    workers_per_group: int = 4
+    num_gamers: int = 4
     early_fill_per_type: int = 0
     early_softmax_moves: int = 12
     early_softmax_exploration: float = 0.5
@@ -95,7 +94,6 @@ class EpochsConfig:
 @dataclass
 class LearningConfig:
     player_dependent_value: bool = True
-    shared_storage_size: int = 3
     replay_window_size: int = 10000
     value_loss: Literal["SE", "AE"] = "SE"
     policy_loss: Literal["CEL", "KLD", "MSE"] = "CEL"

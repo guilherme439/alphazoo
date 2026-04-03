@@ -8,9 +8,9 @@ import torch
 from scipy.special import softmax
 
 from .node import Node
-from ..networks.network_manager import NetworkManager
-from ..utils.caches.keyless_cache import KeylessCache
 from ..configs.search_config import SearchConfig
+from ..ialphazoo_game import IAlphazooGame
+from ..inference.inference_client import InferenceClient
 
 '''
 
@@ -41,17 +41,16 @@ class Explorer:
         self.training = training
         self.player_dependent_value = player_dependent_value
         self.rng = np.random.default_rng()
-        self._scratch_game: Any = None
+        self._scratch_game: IAlphazooGame | None = None
 
     def run_mcts(
         self,
-        game: Any,
-        network_manager: NetworkManager,
+        game: IAlphazooGame,
+        inference_client: InferenceClient,
         root_node: Node,
         recurrent_iterations: int = 1,
-        cache: KeylessCache | None = None,
     ) -> tuple[int, Node, float]:
-        self.network_manager = network_manager
+        self.inference_client = inference_client
         self.recurrent_iterations = recurrent_iterations
         search_start = root_node
 
@@ -73,7 +72,7 @@ class Explorer:
                 scratch_game.step(action_i)
                 search_path.append(node)
 
-            value = self.evaluate(node, scratch_game, cache)
+            value = self.evaluate(node, scratch_game)
             self.backpropagate(search_path, value)
 
         final_root_bias = self.calculate_exploration_bias(search_start)
@@ -82,7 +81,7 @@ class Explorer:
         # final_root_bias is returned just for stats purposes
         return action, search_start.children[action], final_root_bias
 
-    def select_action(self, game: Any, node: Node) -> int:
+    def select_action(self, game: IAlphazooGame, node: Node) -> int:
         visit_counts: list[tuple[int, int]] = [(child.visit_count, action) for action, child in node.children.items()]
 
         if self.training:
@@ -101,7 +100,7 @@ class Explorer:
                     valid_actions_mask = game.action_mask(obs).flatten()
                     n_valids = np.sum(valid_actions_mask)
                     probs = valid_actions_mask / n_valids
-                    action_i = int(self.rng.choice(game.get_num_actions(), p=probs))
+                    action_i = int(self.rng.choice(game.get_action_size(), p=probs))
                 else:
                     action_i = self.max_action(visit_counts)
         else:
@@ -148,7 +147,7 @@ class Explorer:
             node.visit_count += 1
             node.value_sum += value
 
-    def evaluate(self, node: Node, game: Any, cache: KeylessCache | None) -> float:
+    def evaluate(self, node: Node, game: IAlphazooGame) -> float:
         node.to_play = game.get_current_player()
 
         if game.is_terminal():
@@ -160,10 +159,7 @@ class Explorer:
 
         obs = game.observe()
         state = game.obs_to_state(obs, None)
-        if cache is not None:
-            action_probs, predicted_value = cache.get_and_put_if_absent(state, lambda: self._eval_inference(state))
-        else:
-            action_probs, predicted_value = self._eval_inference(state)
+        action_probs, predicted_value = self._eval_inference(state)
 
         value: float = predicted_value.item()
         if self.player_dependent_value and node.to_play != 1:
@@ -181,17 +177,17 @@ class Explorer:
             probs += valid_actions_mask
             total = np.sum(probs)
 
-        for i in range(game.get_num_actions()):
+        for i in range(game.get_action_size()):
             if valid_actions_mask[i]:
                 node.children[i] = Node(probs[i] / total)
 
         return value
 
     def _eval_inference(self, state: Any) -> tuple[Any, Any]:
-        if self.network_manager.is_recurrent():
-            (policy, value), _ = self.network_manager.recurrent_inference(state, False, self.recurrent_iterations)
+        if self.inference_client.is_recurrent():
+            (policy, value), _ = self.inference_client.recurrent_inference(state, False, self.recurrent_iterations)
         else:
-            policy, value = self.network_manager.inference(state, False)
+            policy, value = self.inference_client.inference(state, False)
         return softmax(policy), value
 
     def max_action(self, visit_counts: list[tuple[int, int]]) -> int:

@@ -13,7 +13,6 @@ logger.setLevel(logging.INFO)
 
 from .training.alphazoo import AlphaZoo
 from .training.gamer import Gamer
-from .training.gamer_group import GamerGroup
 from .training.replay_buffer import ReplayBuffer
 from .training.game_record import GameRecord
 
@@ -21,6 +20,8 @@ from .search.explorer import Explorer
 from .search.node import Node
 
 from .networks import AlphaZooNet, AlphaZooRecurrentNet, NetworkManager
+
+from .inference import InferenceServer, InferenceClient
 
 from .configs.alphazoo_config import AlphaZooConfig
 from .ialphazoo_game import IAlphazooGame
@@ -30,7 +31,6 @@ __all__ = [
     "__version__",
     "AlphaZoo",
     "Gamer",
-    "GamerGroup",
     "ReplayBuffer",
     "GameRecord",
     "Explorer",
@@ -38,6 +38,8 @@ __all__ = [
     "AlphaZooNet",
     "AlphaZooRecurrentNet",
     "NetworkManager",
+    "InferenceServer",
+    "InferenceClient",
     "AlphaZooConfig",
     "IAlphazooGame",
     "PettingZooWrapper",

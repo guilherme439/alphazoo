@@ -180,10 +180,10 @@ class TestObservation:
 class TestMetadata:
 
     def test_connect_four_num_actions(self):
-        assert make_connect_four().get_num_actions() == 7
+        assert make_connect_four().get_action_size() == 7
 
     def test_tictactoe_num_actions(self):
-        assert make_tictactoe().get_num_actions() == 9
+        assert make_tictactoe().get_action_size() == 9
 
     def test_length_starts_at_zero(self):
         assert make_connect_four().get_length() == 0

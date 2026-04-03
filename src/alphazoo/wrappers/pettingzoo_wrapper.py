@@ -5,10 +5,13 @@ This wrapper bridges the gap between PettingZoo's AECEnv interface and
 the interface expected by the AlphaZero algorithm.
 """
 
-from typing import Any
 from copy import deepcopy
+from typing import Any
+
 import numpy as np
 import torch
+from gymnasium.spaces.utils import flatdim
+from pettingzoo.utils.env import AECEnv
 
 from ..ialphazoo_game import IAlphazooGame
 
@@ -24,12 +27,13 @@ class PettingZooWrapper(IAlphazooGame):
              standard wrapper layers (OrderEnforcing, etc.).
     """
 
-    def __init__(self, env: Any) -> None:
+    def __init__(self, env: AECEnv) -> None:
         self.env = env
         self.env.reset()
-        self._num_actions = self._compute_num_actions()
         self._step_count = 0
         self._obs_is_float32 = self._check_obs_dtype() # we check the type to avoid unnecessary convertions
+        self._action_shape, self._num_actions = self._compute_action_info()
+        self._state_shape, self._state_size = self._compute_state_info()
 
     def reset(self, *args, **kwargs) -> None:
         self.env.reset(*args, **kwargs)
@@ -72,6 +76,24 @@ class PettingZooWrapper(IAlphazooGame):
             src_layer = src_layer.env
             dst_layer = dst_layer.env
 
+
+    # ------------------------------------------------------------------
+    # Game state queries
+    # ------------------------------------------------------------------
+
+    def is_terminal(self) -> bool:
+        return any(self.env.terminations.values()) or any(self.env.truncations.values())
+
+    def get_terminal_value(self) -> float:
+        current_agent = self.env.agent_selection
+        return float(self.env.rewards[current_agent])
+
+    def get_current_player(self) -> int:
+        return self._extract_player(self.env.agent_selection)
+
+    def get_length(self) -> int:
+        return self._step_count
+
     # ------------------------------------------------------------------
     # Observation interface
     # ------------------------------------------------------------------
@@ -96,29 +118,33 @@ class PettingZooWrapper(IAlphazooGame):
             return np.array(obs['action_mask'], dtype=np.float32)
         return np.ones(self._num_actions, dtype=np.float32)
 
-    # ------------------------------------------------------------------
-    # State queries
-    # ------------------------------------------------------------------
+    def get_action_shape(self) -> tuple[int, ...]:
+        return self._action_shape
 
-    def is_terminal(self) -> bool:
-        return any(self.env.terminations.values()) or any(self.env.truncations.values())
-
-    def get_terminal_value(self) -> float:
-        current_agent = self.env.agent_selection
-        return float(self.env.rewards[current_agent])
-
-    def get_current_player(self) -> int:
-        return self._extract_player(self.env.agent_selection)
-
-    def get_num_actions(self) -> int:
+    def get_action_size(self) -> int:
         return self._num_actions
 
-    def get_length(self) -> int:
-        return self._step_count
+    def get_state_shape(self) -> tuple[int, ...]:
+        return self._state_shape
+
+    def get_state_size(self) -> int:
+        return self._state_size
+
+    
 
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+
+    def _compute_action_info(self) -> tuple[tuple[int, ...], int]:
+        action_space = self.env.action_space(self.env.agent_selection)
+        size = flatdim(action_space)
+        return (size,), size
+
+    def _compute_state_info(self) -> tuple[tuple[int, ...], int]:
+        state = self.obs_to_state(self.observe(), None)
+        shape = tuple(state.shape)
+        return shape, int(np.prod(shape))
 
     def _check_obs_dtype(self) -> bool:
         agent = self.env.agent_selection
@@ -133,14 +159,6 @@ class PettingZooWrapper(IAlphazooGame):
         in the UCT score."""
         return self.env.possible_agents.index(agent) + 1
 
-    def _compute_num_actions(self) -> int:
-        action_space = self.env.action_space(self.env.agent_selection)
-        if hasattr(action_space, 'n'):
-            return action_space.n
-        elif hasattr(action_space, 'shape'):
-            return int(np.prod(action_space.shape))
-        else:
-            raise ValueError(f"Unsupported action space type: {type(action_space)}")
 
     def _clone_pettingzoo_env(self, original_env: Any) -> Any:
         """

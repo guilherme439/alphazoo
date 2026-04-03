@@ -1,43 +1,82 @@
 from __future__ import annotations
 
+import os
+import tempfile
 from typing import Any
 
-import torch
-import numpy as np
+import ray
+import yappi
 
 from ..search.node import Node
 from ..search.explorer import Explorer
-from ..networks.network_manager import NetworkManager
-from ..utils.caches.keyless_cache import KeylessCache
 from ..configs.search_config import SearchConfig
+from ..ialphazoo_game import IAlphazooGame
+from ..inference.inference_client import InferenceClient
 from .game_record import GameRecord
 
 
+@ray.remote(scheduling_strategy="SPREAD", max_concurrency=2)
 class Gamer:
 
     def __init__(
         self,
-        game: Any,
+        record_queue: Any,
+        game: IAlphazooGame,
         game_index: int,
         search_config: SearchConfig,
         recurrent_iterations: int,
-        player_dependent_value: bool = True,
+        player_dependent_value: bool,
+        inference_client: InferenceClient,
     ) -> None:
+        self.record_queue = record_queue
         self.game = game
         self.game_index = game_index
-
         self.search_config = search_config
         self.recurrent_iterations = recurrent_iterations
         self.player_dependent_value = player_dependent_value
+        self.inference_client = inference_client
+        self.inference_client.connect()
 
         self.explorer = Explorer(search_config, True, player_dependent_value)
 
-    def play_game(
-        self,
-        network_manager: NetworkManager,
-        cache: KeylessCache | None = None
-    ) -> tuple[dict[str, float], GameRecord]:
-        
+        self._profile_stats: bytes | None = None
+        self._stopped = False
+
+    def play_games(self, num_games: int) -> list[dict[str, float]]:
+        profiling = os.environ.get("ALPHAZOO_PROFILE")
+
+        if profiling:
+            yappi.clear_stats()
+            yappi.set_clock_type("wall")
+            yappi.start()
+
+        all_stats = []
+        for _ in range(num_games):
+            stats, record = self._play_game()
+            self.record_queue.put((record, self.game_index))
+            all_stats.append(stats)
+
+        if profiling:
+            self._capture_profile_stats()
+
+        return all_stats
+
+    def play_forever(self) -> None:
+        while not self._stopped:
+            stats, record = self._play_game()
+            self.record_queue.put((record, self.game_index))
+
+    def stop(self) -> None:
+        self._stopped = True
+
+    def get_profile_stats(self) -> bytes | None:
+        return self._profile_stats
+
+    # ------------------------------------------------------------------
+    # Internals
+    # ------------------------------------------------------------------
+
+    def _play_game(self) -> tuple[dict[str, float], GameRecord]:
         stats: dict[str, float] = {
             "number_of_moves": 0,
             "average_children": 0,
@@ -48,7 +87,7 @@ class Gamer:
         }
         self.game.reset()
         game = self.game
-        num_actions = game.get_num_actions()
+        num_actions = game.get_action_size()
         keep_subtree: bool = self.search_config.simulation.keep_subtree
 
         root_node = Node(0)
@@ -61,7 +100,7 @@ class Gamer:
             record.add_step(state, game.get_current_player())
 
             action_i, chosen_child, root_bias = self.explorer.run_mcts(
-                game, network_manager, root_node, self.recurrent_iterations, cache,
+                game, self.inference_client, root_node, self.recurrent_iterations,
             )
 
             tree_size = root_node.get_visit_count()
@@ -93,3 +132,12 @@ class Gamer:
         record.set_terminal_value(terminal_value)
 
         return stats, record
+
+    def _capture_profile_stats(self) -> None:
+        yappi.stop()
+        with tempfile.NamedTemporaryFile(suffix=".prof", delete=False) as tmp:
+            tmp_path = tmp.name
+        yappi.get_func_stats().save(tmp_path, type="pstat")
+        with open(tmp_path, "rb") as f:
+            self._profile_stats = f.read()
+        os.unlink(tmp_path)

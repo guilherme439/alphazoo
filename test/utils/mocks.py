@@ -58,8 +58,17 @@ class MockGame:
     def action_mask(self, obs):
         return np.array(obs['action_mask'], dtype=np.float32)
 
-    def get_num_actions(self):
+    def get_action_shape(self):
+        return (self.num_actions,)
+
+    def get_action_size(self):
         return self.num_actions
+
+    def get_state_shape(self):
+        return (1, 4)
+
+    def get_state_size(self):
+        return 4
 
     def get_length(self):
         return self._depth
@@ -85,21 +94,22 @@ class MockNet(AlphaZooNet):
         return policy, value
 
 
-class MockNetworkManager:
-    """Test double for NetworkManager — always acts as a standard (non-recurrent) network."""
+class MockInferenceClient:
+    """Test double that replaces InferenceClient for search tests."""
 
-    def __init__(self, model):
+    def __init__(self, model, is_recurrent_model=False):
         self.model = model
-        self.device = "cpu"
+        self._is_recurrent = is_recurrent_model
 
     def is_recurrent(self):
-        return False
+        return self._is_recurrent
 
-    def inference(self, state, training):
+    def inference(self, state, training=False):
         self.model.eval()
         with torch.no_grad():
             p, v = self.model(state)
         return p, v
 
-    def check_devices(self):
-        pass
+    def recurrent_inference(self, state, training, iters_to_do, interim_thought=None):
+        p, v = self.inference(state)
+        return (p, v), None

@@ -14,8 +14,8 @@ from pettingzoo.classic import tictactoe_v3
 from alphazoo.search.node import Node
 from alphazoo.search.explorer import Explorer
 from alphazoo.configs import SearchConfig
-from alphazoo.configs.search_config import SimulationConfig, UCTConfig, ExplorationConfig
-from alphazoo.networks import AlphaZooNet, NetworkManager
+from alphazoo.networks import AlphaZooNet
+from .utils.mocks import MockInferenceClient
 from .utils.helpers import make_pettingzoo_game
 
 
@@ -50,8 +50,8 @@ def search_config():
 
 
 @pytest.fixture
-def network():
-    return NetworkManager(TicTacToeNet(), device="cpu")
+def inference_client():
+    return MockInferenceClient(TicTacToeNet())
 
 
 def make_game():
@@ -66,35 +66,35 @@ def make_high_sim_config(base_config, n_sims=64):
 
 class TestTicTacToeMCTS:
 
-    def test_selects_valid_action_from_start(self, search_config, network):
+    def test_selects_valid_action_from_start(self, search_config, inference_client):
         explorer = Explorer(search_config, training=False)
         game = make_game()
         root = Node(0)
 
-        action, _, _ = explorer.run_mcts(game, network, root)
+        action, _, _ = explorer.run_mcts(game, inference_client, root)
         obs = game.observe()
         assert game.action_mask(obs)[action] == 1.0
 
-    def test_root_expands_all_9_actions(self, search_config, network):
+    def test_root_expands_all_9_actions(self, search_config, inference_client):
         explorer = Explorer(search_config, training=False)
         game = make_game()
         root = Node(0)
 
-        explorer.run_mcts(game, network, root)
+        explorer.run_mcts(game, inference_client, root)
         assert root.num_children() == 9
 
-    def test_does_not_mutate_game(self, search_config, network):
+    def test_does_not_mutate_game(self, search_config, inference_client):
         explorer = Explorer(search_config, training=False)
         game = make_game()
 
         length_before = game.get_length()
         player_before = game.get_current_player()
-        explorer.run_mcts(game, network, Node(0))
+        explorer.run_mcts(game, inference_client, Node(0))
 
         assert game.get_length() == length_before
         assert game.get_current_player() == player_before
 
-    def test_respects_mask_after_moves(self, search_config, network):
+    def test_respects_mask_after_moves(self, search_config, inference_client):
         explorer = Explorer(search_config, training=False)
         game = make_game()
 
@@ -107,17 +107,17 @@ class TestTicTacToeMCTS:
         occupied = {i for i in range(9) if mask[i] == 0.0}
         assert occupied == {0, 4, 8}
 
-        action, _, _ = explorer.run_mcts(game, network, Node(0))
+        action, _, _ = explorer.run_mcts(game, inference_client, Node(0))
         assert mask[action] == 1.0
 
-    def test_plays_full_game_without_illegal_moves(self, search_config, network):
+    def test_plays_full_game_without_illegal_moves(self, search_config, inference_client):
         explorer = Explorer(search_config, training=False)
         game = make_game()
 
         moves = 0
         while not game.is_terminal():
             root = Node(0)
-            action, _, _ = explorer.run_mcts(game, network, root)
+            action, _, _ = explorer.run_mcts(game, inference_client, root)
 
             obs = game.observe()
             mask = game.action_mask(obs)
@@ -136,7 +136,7 @@ class TestTicTacToeStrategic:
     def test_finds_winning_move_for_player_1(self, search_config):
         """p1 has diagonal 0-4, can win with 8. MCTS should find it."""
         cfg = make_high_sim_config(search_config, n_sims=64)
-        net = NetworkManager(UniformTicTacToeNet(), device="cpu")
+        client = MockInferenceClient(UniformTicTacToeNet())
         explorer = Explorer(cfg, training=False)
 
         game = make_game()
@@ -147,13 +147,13 @@ class TestTicTacToeStrategic:
         # p1 to play, winning move is 8
         assert game.get_current_player() == 1
 
-        action, _, _ = explorer.run_mcts(game, net, Node(0))
+        action, _, _ = explorer.run_mcts(game, client, Node(0))
         assert action == 8
 
     def test_finds_winning_move_for_player_2(self, search_config):
         """p2 has 3-4, can win with 5 (middle row). MCTS should find it."""
         cfg = make_high_sim_config(search_config, n_sims=64)
-        net = NetworkManager(UniformTicTacToeNet(), device="cpu")
+        client = MockInferenceClient(UniformTicTacToeNet())
         explorer = Explorer(cfg, training=False)
 
         game = make_game()
@@ -165,13 +165,13 @@ class TestTicTacToeStrategic:
         # p2 to play, winning move is 5
         assert game.get_current_player() == 2
 
-        action, _, _ = explorer.run_mcts(game, net, Node(0))
+        action, _, _ = explorer.run_mcts(game, client, Node(0))
         assert action == 5
 
     def test_winning_move_gets_most_visits(self, search_config):
         """The winning child node should accumulate the most visits."""
         cfg = make_high_sim_config(search_config, n_sims=64)
-        net = NetworkManager(UniformTicTacToeNet(), device="cpu")
+        client = MockInferenceClient(UniformTicTacToeNet())
         explorer = Explorer(cfg, training=False)
 
         game = make_game()
@@ -181,7 +181,7 @@ class TestTicTacToeStrategic:
         game.step(6)  # p2
 
         root = Node(0)
-        explorer.run_mcts(game, net, root)
+        explorer.run_mcts(game, client, root)
 
         visits = {a: c.visit_count for a, c in root.children.items()}
         assert visits[8] == max(visits.values())

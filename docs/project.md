@@ -22,13 +22,13 @@ The model must subclass either `AlphaZooNet` or `AlphaZooRecurrentNet` (both fro
 ### Training Orchestrator (`training/alphazoo.py`)
 
 `AlphaZoo` class manages the full training loop:
-1. **Self-play phase** (`run_selfplay`): Ray actors (`GamerGroup`) play games using MCTS with threaded workers, storing trajectories in a `ReplayBuffer`
+1. **Self-play phase** (`run_selfplay`): Ray `Gamer` actors play games using MCTS, each connected to a centralized `InferenceServer` via shared memory. Trajectories are stored in a `ReplayBuffer`.
 2. **Network training phase** (`train_network`): samples batches from replay buffer, computes policy + value loss, backprops
-3. **Model distribution**: updated weights pushed to `RemoteStorage` for actors to pull
+3. **Model distribution**: updated weights pushed to the `InferenceServer` via `publish_model()`
 
 Two execution modes:
 - **Sequential**: fixed games per step, then train. Self-play and training never overlap.
-- **Asynchronous**: GamerGroups play continuously via `play_forever()`, training triggered on a timer (`update_delay`). The trainer drains the record queue each step, trains, and pushes updated weights. Groups detect weight changes via `NetworkManager.get_version()` and invalidate their cache when the network updates.
+- **Asynchronous**: Gamers play continuously via `play_forever()`, training triggered on a timer (`update_delay`). The trainer drains the record queue each step, trains, and pushes updated weights to the inference server.
 
 ### MCTS (`search/`)
 
@@ -41,7 +41,8 @@ Two execution modes:
 
 `IAlphazooGame` ABC defines the game interface AlphaZoo needs:
 - `reset()`, `step()`, `observe()`, `obs_to_state()`, `action_mask()`
-- `is_terminal()`, `get_terminal_value()`, `shallow_clone()` (for MCTS rollouts)
+- `is_terminal()`, `get_terminal_value()`, `shallow_clone()`, `copy_state_from()`
+- `get_action_shape()`, `get_action_size()`, `get_state_shape()`, `get_state_size()`, `get_length()`
 
 `PettingZooWrapper` (`wrappers/pettingzoo_wrapper.py`) is the default implementation of `IAlphazooGame` for PettingZoo AECEnv environments.
 
@@ -52,9 +53,10 @@ Two execution modes:
 ### Distributed Architecture
 
 Ray actors for parallelism:
-- `GamerGroup` (`training/gamer_group.py`): each group is a Ray actor running K worker threads that share one cache and one network copy. `Gamer` (`training/gamer.py`) is a plain class used per-thread. Supports `play_games(n)` for sequential mode and `play_forever()`/`stop()` for async mode.
+- `Gamer` (`training/gamer.py`): each Gamer is a Ray actor that plays games using MCTS. Connects to the `InferenceServer` via an `InferenceClient` for neural network evaluations. Supports `play_games(n)` for sequential mode and `play_forever()`/`stop()` for async mode.
+- `InferenceServer` (`inference/inference_server.py`): centralized Ray actor that holds the model and serves inference requests. Uses named shared memory (`InferenceSlot`) for zero-copy tensor passing and named FIFO pipes for signaling. Each client gets a dedicated slot served by its own thread.
+- `InferenceClient` (`inference/inference_client.py`): lightweight handle that Gamers use to request inference. Writes states into shared memory, signals the server via a FIFO pipe, and reads results back.
 - `ReplayBuffer`: shared training data store
-- `RemoteStorage` (`utils/remote_storage.py`): generic item storage (keeps last N items)
 
 ### Caching (`utils/caches/`)
 
@@ -67,7 +69,7 @@ Dataclass hierarchy with defaults:
 ```
 AlphaZooConfig
 ├── verbose (toggle training logs)
-├── RunningConfig (sequential vs async, num groups, workers per group, training steps)
+├── RunningConfig (sequential vs async, num gamers, training steps)
 ├── CacheConfig (enabled, max size)
 ├── RecurrentConfig | None  (required when using AlphaZooRecurrentNet)
 │   ├── train_iterations, pred_iterations, test_iterations
@@ -102,7 +104,7 @@ Controls how the network's value output is interpreted relative to players.
 
 Use `network_manager.is_recurrent()` to branch on network type at call sites.
 
-Tracks a version counter used by GamerGroups to detect weight changes and invalidate their cache.
+Tracks a version counter used by the `InferenceServer` to detect weight changes and invalidate the cache.
 
 ## Key Dependencies
 
