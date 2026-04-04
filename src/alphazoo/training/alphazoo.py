@@ -330,6 +330,14 @@ class AlphaZoo:
         self.inference_server.stop.remote()
         ray.get(self._server_future)
 
+        if self._is_profiling_active():
+            profile_futures = [
+                gamer.get_profile_stats.remote()
+                for gamers in self._gamers for gamer in gamers
+            ]
+            profile_results = ray.get(profile_futures)
+            self._profile_bytes.extend(b for b in profile_results if b is not None)
+
         if self._profile_bytes:
             profile_dir = os.environ.get("ALPHAZOO_PROFILE_DIR", "profiling")
             os.makedirs(profile_dir, exist_ok=True)

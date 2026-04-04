@@ -60,9 +60,17 @@ class Gamer:
             self._capture_profile_stats()
 
     def play_forever(self) -> None:
+        if self.profiling:
+            yappi.clear_stats()
+            yappi.set_clock_type("wall")
+            yappi.start()
+
         while not self._stopped:
             record = self._play_game()
             self.record_queue.put((record, self.game_index))
+
+        if self.profiling:
+            self._capture_profile_stats()
 
     def set_search_config(self, search_config: SearchConfig) -> None:
         self.search_config = search_config

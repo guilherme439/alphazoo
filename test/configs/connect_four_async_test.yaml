@@ -1,37 +1,35 @@
 verbose: true
 
 running:
-  running_mode: "sequential"
-  num_gamers: 1
-  early_fill_per_type: 2
-  training_steps: 10
-  early_softmax_moves: 100
+  running_mode: "asynchronous"
+  num_gamers: 2
+  early_fill_per_type: 3
+  training_steps: 3
+  early_softmax_moves: 3
   early_softmax_exploration: 1.0
   early_random_exploration: 0.0
-  sequential:
-    num_games_per_type_per_step: 2
+  asynchronous:
+    update_delay: 1.5
 
 cache:
-  enabled: false
-  max_size: 1000
+  enabled: true
+  max_size: 500
 
 learning:
+  player_dependent_value: true
   replay_window_size: 500
-  learning_method: "epochs"
-  value_loss: "SE"
-  policy_loss: "KLD"
-  normalize_cel: false
-  epochs:
-    batch_size: 32
-    learning_epochs: 1
+  learning_method: "samples"
+  value_loss: "AE"
+  policy_loss: "CEL"
+  normalize_cel: true
   samples:
-    batch_size: 32
-    num_samples: 100
-    late_heavy: false
-    with_replacement: true
+    batch_size: 16
+    num_samples: 8
+    late_heavy: true
+    with_replacement: false
 
 optimizer:
-  optimizer_choice: "Adam"
+  optimizer_choice: "SGD"
   sgd:
     weight_decay: 0.0001
     momentum: 0.9
@@ -45,7 +43,7 @@ scheduler:
 search:
   simulation:
     mcts_simulations: 8
-    keep_subtree: false
+    keep_subtree: true
   uct:
     pb_c_base: 10000
     pb_c_init: 1.15
@@ -54,7 +52,7 @@ search:
     epsilon_softmax_exploration: 0.04
     epsilon_random_exploration: 0.003
     value_factor: 1.0
-    root_exploration_distribution: "dirichlet"
+    root_exploration_distribution: "gamma"
     root_exploration_fraction: 0.25
-    root_dist_alpha: 0.3
+    root_dist_alpha: 0.15
     root_dist_beta: 1.0

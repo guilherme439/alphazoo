@@ -42,7 +42,7 @@ def test_profiling_connect_four() -> None:
     os.environ["RAY_DEDUP_LOGS"] = "0"
 
     config_path = os.path.join(
-        os.path.dirname(__file__), "configs", "connect_four_profiling.yaml"
+        os.path.dirname(__file__), "configs", "profiling.yaml"
     )
     config = AlphaZooConfig.from_yaml(config_path)
     model = ConnectFourNet()

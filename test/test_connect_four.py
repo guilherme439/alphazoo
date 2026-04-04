@@ -36,9 +36,25 @@ class ConnectFourNet(AlphaZooNet):
 
 # --------------- Test --------------- #
 
-def test_connect_four_training() -> None:
+def test_connect_four_seq_training() -> None:
     config_path = os.path.join(
-        os.path.dirname(__file__), "configs", "connect_four_test.yaml"
+        os.path.dirname(__file__), "configs", "connect_four_seq_test.yaml"
+    )
+    config = AlphaZooConfig.from_yaml(config_path)
+    model = ConnectFourNet()
+
+    trainer = AlphaZoo(
+        env=connect_four_v3.env(),
+        config=config,
+        model=model,
+    )
+
+    trainer.train()
+
+
+def test_connect_four_async_training() -> None:
+    config_path = os.path.join(
+        os.path.dirname(__file__), "configs", "connect_four_async_test.yaml"
     )
     config = AlphaZooConfig.from_yaml(config_path)
     model = ConnectFourNet()
