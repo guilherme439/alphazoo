@@ -9,6 +9,7 @@ import more_itertools
 import torch
 from torch import Tensor, nn
 
+from ..metrics import MetricsRecorder
 from ..networks.network_manager import NetworkManager
 from .replay_buffer import ReplayBuffer
 
@@ -23,6 +24,10 @@ class NetworkTrainer:
         self.network_manager = network_manager
         self.optimizer = optimizer
         self.scheduler = scheduler
+        self.recorder = MetricsRecorder()
+
+    def get_metrics(self) -> dict:
+        return self.recorder.drain()
 
     def train_with_epochs(
         self,
@@ -80,6 +85,11 @@ class NetworkTrainer:
 
             logger.info("Epoch " + str(e + 1) + "/" + str(learning_epochs) + " done.")
 
+        final_v, final_p, final_c = epoch_losses[-1]
+        self.recorder.scalar("train/value_loss", final_v)
+        self.recorder.scalar("train/policy_loss", final_p)
+        self.recorder.scalar("train/combined_loss", final_c)
+
         return epoch_losses
 
     def train_with_samples(
@@ -132,6 +142,10 @@ class NetworkTrainer:
         average_value_loss /= num_samples
         average_policy_loss /= num_samples
         average_combined_loss /= num_samples
+
+        self.recorder.scalar("train/value_loss", average_value_loss)
+        self.recorder.scalar("train/policy_loss", average_policy_loss)
+        self.recorder.scalar("train/combined_loss", average_combined_loss)
 
         return average_value_loss, average_policy_loss, average_combined_loss
 

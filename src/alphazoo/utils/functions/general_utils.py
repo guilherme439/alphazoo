@@ -1,7 +1,13 @@
+from typing import Callable
+
 import torch
+from torch import Tensor, nn
 from torch.optim import Adam, SGD, Optimizer
 
 from ..caches.keyless_cache import KeylessCache
+from .loss_functions import AbsoluteError, KLDivergence, MSError, SquaredError
+
+LossFunction = Callable[[Tensor, Tensor], Tensor]
 
 
 def initialize_parameters(model: torch.nn.Module) -> None:
@@ -13,6 +19,28 @@ def initialize_parameters(model: torch.nn.Module) -> None:
 
 def create_cache(max_size: int) -> KeylessCache:
     return KeylessCache(max_size)
+
+
+def get_policy_loss_fn(choice: str, normalize_cel: bool) -> tuple[LossFunction, bool]:
+    match choice:
+        case "CEL":
+            return nn.CrossEntropyLoss(label_smoothing=0.02), normalize_cel
+        case "KLD":
+            return KLDivergence, False
+        case "MSE":
+            return MSError, False
+        case _:
+            raise ValueError(f"Unknown policy loss: {choice}")
+
+
+def get_value_loss_fn(choice: str) -> LossFunction:
+    match choice:
+        case "SE":
+            return SquaredError
+        case "AE":
+            return AbsoluteError
+        case _:
+            raise ValueError(f"Unknown value loss: {choice}")
 
 
 def create_optimizer(

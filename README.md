@@ -1,6 +1,6 @@
 # AlphaZoo
 
-Modest Standalone AlphaZero implementation for any game (1 or 2 player) with native support for [PettingZoo](https://github.com/Farama-Foundation/PettingZoo) environments.
+Optimized Standalone AlphaZero implementation with native support for [PettingZoo](https://github.com/Farama-Foundation/PettingZoo) environments.
 
 
 ## Features
@@ -8,13 +8,14 @@ Modest Standalone AlphaZero implementation for any game (1 or 2 player) with nat
 ### Standard AlphaZero
 
 &nbsp;&nbsp;&nbsp;&nbsp; ✅ &nbsp; Works with **any game** and **any network**.  
-&nbsp;&nbsp;&nbsp;&nbsp; ✅ &nbsp; Can run **sequential** or fully **asynchronously** (uses [Ray](https://github.com/ray-project/ray) under the hood).
+&nbsp;&nbsp;&nbsp;&nbsp; ✅ &nbsp; Can run **sequential** or fully **asynchronously** (uses [Ray](https://github.com/ray-project/ray) under the hood).  
+&nbsp;&nbsp;&nbsp;&nbsp; ✅ &nbsp; **GPU-accelerated** training and inference.  
+&nbsp;&nbsp;&nbsp;&nbsp; ✅ &nbsp; Optimized for throughput: dedicated **inference server**, **shared-memory IPC**, and specialized **inference cache**.
 
 ### Beyond AlphaZero 
 
-&nbsp;&nbsp;&nbsp;&nbsp; ✅ &nbsp; Highly optimized **inference cache**.  
 &nbsp;&nbsp;&nbsp;&nbsp; ✅ &nbsp; Support for [DeepThinking](https://github.com/aks2203/deep-thinking) networks and **progressive loss**.  
-&nbsp;&nbsp;&nbsp;&nbsp; ✅ &nbsp; Supports **different value perspectives** (player dependent, like the original alphazero, or _static_).  
+&nbsp;&nbsp;&nbsp;&nbsp; ✅ &nbsp; Supports **different value perspectives** (_player dependent_, like the original alphazero, or _static_).  
 &nbsp;&nbsp;&nbsp;&nbsp; ✅ &nbsp; Allows different **data sampling** methods and loss functions.  
 
 

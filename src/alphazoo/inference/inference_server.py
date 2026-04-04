@@ -13,6 +13,7 @@ import ray
 import torch
 from readerwriterlock import rwlock
 
+from ..metrics import MetricsRecorder
 from ..networks.network_manager import NetworkManager
 from ..utils.functions.general_utils import create_cache
 from .inference_client import InferenceClient
@@ -102,6 +103,7 @@ class InferenceServer:
 
         self._stop_r, self._stop_w = os.pipe()
         self._stopped = False
+        self.recorder = MetricsRecorder()
 
     def get_clients(self) -> list[InferenceClient]:
         return self._clients
@@ -132,13 +134,11 @@ class InferenceServer:
         self._stopped = True
         os.write(self._stop_w, b'\x01')
 
-    def get_cache_stats(self) -> dict[str, float]:
-        if not self._cache_enabled:
-            return {"hit_ratio": 0.0, "length": 0.0}
-        return {
-            "hit_ratio": self._cache.get_hit_ratio(),
-            "length": float(self._cache.length()),
-        }
+    def get_metrics(self) -> dict:
+        if self._cache_enabled:
+            self.recorder.scalar("cache/hit_ratio", self._cache.get_hit_ratio())
+            self.recorder.scalar("cache/length", float(self._cache.length()))
+        return self.recorder.drain()
 
     # ------------------------------------------------------------------
     # Internals

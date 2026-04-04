@@ -46,7 +46,7 @@ class SequentialConfig:
 
 @dataclass
 class AsynchronousConfig:
-    update_delay: int = 120
+    update_delay: float = 120
 
 
 @dataclass

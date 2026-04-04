@@ -159,19 +159,33 @@ AlphaZooConfig
 
 ## Callbacks
 
-The `on_step_end` callback receives the `AlphaZoo` instance, the current step number, and a metrics dict:
+The `on_step_end` callback receives the `AlphaZoo` instance, the current step number, and a public metrics dict:
 
 ```python
 def on_step_end(az, step, metrics):
     print(f"Step {step}")
-    print(f"  episode_len_mean:    {metrics['episode_len_mean']:.1f}")
-    print(f"  combined_loss:       {metrics['combined_loss']}")
-    print(f"  replay_buffer_size:  {metrics['replay_buffer_size']}")
+    print(f"  episode_len_mean:    {metrics['rollout/episode_len_mean']:.1f}")
+    print(f"  combined_loss:       {metrics.get('train/combined_loss')}")
+    print(f"  replay_buffer_size:  {metrics['train/replay_buffer_size']}")
 
 trainer.train(on_step_end=on_step_end)
 ```
 
-Available metrics: `step`, `episode_len_mean`, `value_loss`, `policy_loss`, `combined_loss`, `replay_buffer_size`, `learning_rate`, `step_time`, `loss_history`.
+Public metrics (available in callback):
+
+| Key | Description |
+|---|---|
+| `step` | Current training step |
+| `rollout/episode_len_mean` | Average moves per game |
+| `rollout/moves` | Total moves this step |
+| `rollout/games` | Total games this step |
+| `train/value_loss` | Value head loss |
+| `train/policy_loss` | Policy head loss |
+| `train/combined_loss` | Combined loss |
+| `train/replay_buffer_size` | Replay buffer size |
+| `train/learning_rate` | Current learning rate |
+| `train/loss_history` | Dict with `value`, `policy`, `combined` lists of `(step, loss)` tuples |
+| `cache/hit_ratio` | Inference cache hit ratio |
 
 Use this callback for checkpointing, logging, or early stopping.
 

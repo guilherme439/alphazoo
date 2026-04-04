@@ -12,6 +12,7 @@ from ..search.explorer import Explorer
 from ..configs.search_config import SearchConfig
 from ..ialphazoo_game import IAlphazooGame
 from ..inference.inference_client import InferenceClient
+from ..metrics import MetricsRecorder
 from .game_record import GameRecord
 
 
@@ -27,6 +28,7 @@ class Gamer:
         recurrent_iterations: int,
         player_dependent_value: bool,
         inference_client: InferenceClient,
+        profiling: bool = False,
     ) -> None:
         self.record_queue = record_queue
         self.game = game
@@ -36,38 +38,41 @@ class Gamer:
         self.player_dependent_value = player_dependent_value
         self.inference_client = inference_client
         self.inference_client.connect()
+        self.profiling = profiling
 
         self.explorer = Explorer(search_config, True, player_dependent_value)
+        self.recorder = MetricsRecorder()
 
         self._profile_stats: bytes | None = None
         self._stopped = False
 
-    def play_games(self, num_games: int) -> list[dict[str, float]]:
-        profiling = os.environ.get("ALPHAZOO_PROFILE")
-
-        if profiling:
+    def play_games(self, num_games: int) -> None:
+        if self.profiling:
             yappi.clear_stats()
             yappi.set_clock_type("wall")
             yappi.start()
 
-        all_stats = []
         for _ in range(num_games):
-            stats, record = self._play_game()
+            record = self._play_game()
             self.record_queue.put((record, self.game_index))
-            all_stats.append(stats)
 
-        if profiling:
+        if self.profiling:
             self._capture_profile_stats()
-
-        return all_stats
 
     def play_forever(self) -> None:
         while not self._stopped:
-            stats, record = self._play_game()
+            record = self._play_game()
             self.record_queue.put((record, self.game_index))
+
+    def set_search_config(self, search_config: SearchConfig) -> None:
+        self.search_config = search_config
+        self.explorer = Explorer(search_config, True, self.player_dependent_value)
 
     def stop(self) -> None:
         self._stopped = True
+
+    def get_metrics(self) -> dict:
+        return self.recorder.drain()
 
     def get_profile_stats(self) -> bytes | None:
         return self._profile_stats
@@ -76,15 +81,7 @@ class Gamer:
     # Internals
     # ------------------------------------------------------------------
 
-    def _play_game(self) -> tuple[dict[str, float], GameRecord]:
-        stats: dict[str, float] = {
-            "number_of_moves": 0,
-            "average_children": 0,
-            "average_tree_size": 0,
-            "final_tree_size": 0,
-            "average_bias_value": 0,
-            "final_bias_value": 0,
-        }
+    def _play_game(self) -> GameRecord:
         self.game.reset()
         game = self.game
         num_actions = game.get_action_size()
@@ -115,23 +112,21 @@ class Gamer:
                 root_node = Node(0)
 
             move_count += 1
-            stats["average_children"] += node_children
-            stats["average_tree_size"] += tree_size
-            stats["final_tree_size"] = tree_size
-            stats["average_bias_value"] += root_bias
-            stats["final_bias_value"] = root_bias
+            self.recorder.mean("rollout/children", node_children)
+            self.recorder.mean("rollout/tree_size", tree_size)
+            self.recorder.mean("rollout/bias", root_bias)
 
-        stats["number_of_moves"] = move_count
-        stats["average_children"] /= move_count
-        stats["average_tree_size"] /= move_count
-        stats["average_bias_value"] /= move_count
+        self.recorder.scalar("rollout/final_tree_size", tree_size)
+        self.recorder.scalar("rollout/final_bias", root_bias)
+        self.recorder.counter("rollout/moves", move_count)
+        self.recorder.counter("rollout/games", 1)
 
         terminal_value = game.get_terminal_value()
         if self.player_dependent_value and game.get_current_player() != 1:
             terminal_value = -terminal_value
         record.set_terminal_value(terminal_value)
 
-        return stats, record
+        return record
 
     def _capture_profile_stats(self) -> None:
         yappi.stop()
