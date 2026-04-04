@@ -299,23 +299,21 @@ class AlphaZoo:
             training_end = time.time()
 
             if running_mode == "asynchronous":
+                # TODO: rever isto
                 self._drain_record_queue()
 
             if trained:
                 self.training_network_manager.increment_version()
                 self._publish_model()
 
+            # Step end
             step_end = time.time()
-
             public = self._collect_step_metrics(
                 step, step_start, selfplay_end, training_end, step_end, run_start,
             )
-
             if on_step_end is not None:
                 on_step_end(self, step, public)
-
             self.metrics_store.clear()
-
             logger.info("Step time(s): " + format(step_end - step_start, '.4'))
             logger.info("\n-------------------------------------\n\n")
 
@@ -413,6 +411,8 @@ class AlphaZoo:
 
         logger.info("\nReplay buffer: " + str(replay_size) + " positions, " + str(n_games) + " games.")
 
+        # FIXME: isto nao ta certo, se replacement for true o batch size pode ser maior
+        # Isto devia rebentar lá dentro caso não dê, por isso esta funçao nao devia ter este check nem devolver um bool
         if replay_size < batch_size:
             logger.info("Not enough data for training (need " + str(batch_size) + "). Skipping.")
             return False
