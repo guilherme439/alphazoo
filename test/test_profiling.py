@@ -1,11 +1,9 @@
 import os
 import time
-from datetime import datetime
 
 import pytest
 import torch
 import torch.nn as nn
-import yappi
 from pettingzoo.classic import connect_four_v3
 
 from alphazoo.configs.alphazoo_config import AlphaZooConfig
@@ -46,45 +44,11 @@ def test_profiling_connect_four() -> None:
     )
     config = AlphaZooConfig.from_yaml(config_path)
     model = ConnectFourNet()
-    training_steps = config.running.training_steps
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = os.path.join("profiling", timestamp)
-    os.makedirs(run_dir, exist_ok=True)
-    os.environ["ALPHAZOO_PROFILE_DIR"] = run_dir
 
     trainer = AlphaZoo(
         env=connect_four_v3.env(),
         config=config,
         model=model,
     )
-
-    yappi.set_clock_type("wall")
-    yappi.start()
-
-    start = time.time()
     trainer.train()
-    total_time = time.time() - start
-
-    yappi.stop()
-
-    main_prof = os.path.join(run_dir, "main_profile.prof")
-    actor_prof = os.path.join(run_dir, "actor_profile.prof")
-    yappi.get_func_stats().save(main_prof, type="pstat")
-
-    avg_step_time = total_time / training_steps
-    summary_path = os.path.join(run_dir, "summary.txt")
-    with open(summary_path, "w") as f:
-        f.write(f"Total run time:       {total_time:.2f}s ({total_time / 60:.2f}m)\n")
-        f.write(f"Training steps:       {training_steps}\n")
-        f.write(f"Avg time per step:    {avg_step_time:.2f}s\n")
-
     del os.environ["ALPHAZOO_PROFILE"]
-    del os.environ["ALPHAZOO_PROFILE_DIR"]
-
-    print(f"\n\nProfiling complete. Results in: {run_dir}/")
-    print(f"  Main profile: {main_prof}")
-    print(f"  Actor profile: {actor_prof}")
-    print(f"  Summary: {summary_path}")
-    print(f"\nView with: snakeviz {main_prof}")
-    print(f"           snakeviz {actor_prof}")

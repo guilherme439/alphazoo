@@ -116,6 +116,12 @@ Centralized metrics system with local recorders and typed aggregation.
 
 Metric types: `scalar` (last value), `mean` (running average), `counter` (accumulated sum), `lifetime_counter` / `lifetime_scalar` (survive `clear()`). Public metrics go to the `on_step_end` callback; internal metrics are for debugging. Metrics use SB3-style namespaces: `rollout/`, `train/`, `cache/`, `time/`.
 
+### Profiling (`profiling/`)
+
+Optional wall-clock profiling of both the main process and Ray worker actors, activated by setting the `ALPHAZOO_PROFILE` environment variable.
+
+- **`Profiler`** (`profiler.py`): lightweight data collector and merger that wraps yappi. Provides `start()` / `stop()` for yappi lifecycle, `merge()` to combine multiple worker profiles, and `save_data_to_file()` / `save_metrics_to_file()` for output. All data transfer between workers and the main process uses in-memory marshaled pstat dicts (no temp files). Each Gamer actor receives its own `Profiler` instance and starts yappi in its constructor so the full call tree (including `play_forever` / `play_games`) is captured. Profiles are collected once at the end of training via `_finalize_profiling()`, which writes `main_profile.prof`, `actor_profile.prof`, and `summary.txt` to a timestamped directory under `profiling/`.
+
 ## Key Dependencies
 
 - **PyTorch**: neural networks

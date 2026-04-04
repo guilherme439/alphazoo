@@ -1,19 +1,19 @@
 from __future__ import annotations
 
-import os
-import tempfile
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import ray
-import yappi
 
-from ..search.node import Node
-from ..search.explorer import Explorer
 from ..configs.search_config import SearchConfig
 from ..ialphazoo_game import IAlphazooGame
 from ..inference.inference_client import InferenceClient
 from ..metrics import MetricsRecorder
+from ..search.explorer import Explorer
+from ..search.node import Node
 from .game_record import GameRecord
+
+if TYPE_CHECKING:
+    from ..profiling import Profiler
 
 
 @ray.remote(scheduling_strategy="SPREAD", max_concurrency=2)
@@ -28,7 +28,7 @@ class Gamer:
         recurrent_iterations: int,
         player_dependent_value: bool,
         inference_client: InferenceClient,
-        profiling: bool = False,
+        profiler: Profiler | None = None,
     ) -> None:
         self.record_queue = record_queue
         self.game = game
@@ -37,40 +37,26 @@ class Gamer:
         self.recurrent_iterations = recurrent_iterations
         self.player_dependent_value = player_dependent_value
         self.inference_client = inference_client
-        self.inference_client.connect()
-        self.profiling = profiling
+        self.profiler = profiler
 
+        self.inference_client.connect()
         self.explorer = Explorer(search_config, True, player_dependent_value)
         self.recorder = MetricsRecorder()
 
-        self._profile_stats: bytes | None = None
         self._stopped = False
 
-    def play_games(self, num_games: int) -> None:
-        if self.profiling:
-            yappi.clear_stats()
-            yappi.set_clock_type("wall")
-            yappi.start()
+        if self.profiler:
+            self.profiler.start()
 
+    def play_games(self, num_games: int) -> None:
         for _ in range(num_games):
             record = self._play_game()
             self.record_queue.put((record, self.game_index))
 
-        if self.profiling:
-            self._capture_profile_stats()
-
     def play_forever(self) -> None:
-        if self.profiling:
-            yappi.clear_stats()
-            yappi.set_clock_type("wall")
-            yappi.start()
-
         while not self._stopped:
             record = self._play_game()
             self.record_queue.put((record, self.game_index))
-
-        if self.profiling:
-            self._capture_profile_stats()
 
     def set_search_config(self, search_config: SearchConfig) -> None:
         self.search_config = search_config
@@ -82,8 +68,10 @@ class Gamer:
     def get_metrics(self) -> dict:
         return self.recorder.drain()
 
-    def get_profile_stats(self) -> bytes | None:
-        return self._profile_stats
+    def get_profile_stats(self) -> bytes:
+        if self.profiler is None:
+            raise RuntimeError("get_profile_stats called but profiler is not set")
+        return self.profiler.stop()
 
     # ------------------------------------------------------------------
     # Internals
@@ -135,12 +123,3 @@ class Gamer:
         record.set_terminal_value(terminal_value)
 
         return record
-
-    def _capture_profile_stats(self) -> None:
-        yappi.stop()
-        with tempfile.NamedTemporaryFile(suffix=".prof", delete=False) as tmp:
-            tmp_path = tmp.name
-        yappi.get_func_stats().save(tmp_path, type="pstat")
-        with open(tmp_path, "rb") as f:
-            self._profile_stats = f.read()
-        os.unlink(tmp_path)

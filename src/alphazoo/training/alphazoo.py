@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-import pstats
 import resource
-import tempfile
 import time
 from copy import deepcopy
 from datetime import datetime
@@ -13,22 +11,24 @@ from typing import Any, Callable
 import psutil
 import ray
 import torch
+from pettingzoo.utils.env import AECEnv
 from ray.util.queue import Queue
 from torch.optim.lr_scheduler import MultiStepLR
 
-from pettingzoo.utils.env import AECEnv
-
-from ..wrappers.pettingzoo_wrapper import PettingZooWrapper
 from ..configs.alphazoo_config import AlphaZooConfig
 from ..ialphazoo_game import IAlphazooGame
+from ..inference.inference_server import InferenceServer
 from ..metrics import MetricsRecorder, MetricsStore
 from ..networks.interfaces import AlphaZooNet, AlphaZooRecurrentNet
 from ..networks.network_manager import NetworkManager
-from ..inference.inference_server import InferenceServer
-from ..utils.functions.general_utils import create_optimizer, get_policy_loss_fn, get_value_loss_fn
+from ..profiling import Profiler
+from ..utils.functions.general_utils import (create_optimizer,
+                                             get_policy_loss_fn,
+                                             get_value_loss_fn)
+from ..wrappers.pettingzoo_wrapper import PettingZooWrapper
 from .gamer import Gamer
-from .replay_buffer import ReplayBuffer
 from .network_trainer import LossFunction, NetworkTrainer
+from .replay_buffer import ReplayBuffer
 
 logger = logging.getLogger("alphazoo")
 
@@ -47,6 +47,7 @@ class AlphaZoo:
         replay_buffer_state: dict | None = None,
     ) -> None:
         self.config = config
+        self.profiling = "ALPHAZOO_PROFILE" in os.environ
 
         envs = env if isinstance(env, list) else [env]
         self.games = [
@@ -232,7 +233,12 @@ class AlphaZoo:
 
         run_start = time.time()
 
-        self._profile_bytes: list[bytes] = []
+        profiler: Profiler | None = None
+        if self.profiling:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self._profiling_dir = os.path.join("profiling", timestamp)
+            profiler = Profiler(self._profiling_dir)
+            profiler.start()
 
         # ---- GAMER SETUP ---- #
 
@@ -328,33 +334,11 @@ class AlphaZoo:
         self.inference_server.stop.remote()
         ray.get(self._server_future)
 
-        if self._is_profiling_active():
-            profile_futures = [
-                gamer.get_profile_stats.remote()
-                for gamers in self._gamers for gamer in gamers
-            ]
-            profile_results = ray.get(profile_futures)
-            self._profile_bytes.extend(b for b in profile_results if b is not None)
-
-        if self._profile_bytes:
-            profile_dir = os.environ.get("ALPHAZOO_PROFILE_DIR", "profiling")
-            os.makedirs(profile_dir, exist_ok=True)
-            tmp_paths = []
-            for raw in self._profile_bytes:
-                tmp = tempfile.NamedTemporaryFile(suffix=".prof", delete=False)
-                tmp.write(raw)
-                tmp.close()
-                tmp_paths.append(tmp.name)
-
-            merged = pstats.Stats(tmp_paths[0])
-            for p in tmp_paths[1:]:
-                merged.add(p)
-            merged.dump_stats(os.path.join(profile_dir, "actor_profile.prof"))
-
-            for p in tmp_paths:
-                os.unlink(p)
-
         total_run_time = time.time() - run_start
+        self._collect_final_metrics(total_run_time)
+        if self.profiling:
+            self._finalize_profiling(profiler, total_run_time)
+
         logger.info("Total run time: " + format(total_run_time / 60, '.4') + "m")
         logger.info("All done.\nExiting")
 
@@ -376,14 +360,6 @@ class AlphaZoo:
                 if n > 0
             )
         ray.get(play_futures)
-
-        if self._is_profiling_active():
-            profile_futures = [
-                gamer.get_profile_stats.remote()
-                for gamers in self._gamers for gamer in gamers
-            ]
-            profile_results = ray.get(profile_futures)
-            self._profile_bytes.extend(b for b in profile_results if b is not None)
 
         total_time = time.time() - start
         logger.info("Games: " + str(total_games) +
@@ -447,7 +423,6 @@ class AlphaZoo:
     ) -> list[list[Any]]:
         all_gamers: list[list[Any]] = []
         client_offset = 0
-        profiling = self._is_profiling_active()
         for i, game in enumerate(self.games):
             clients = self._inference_clients[client_offset:client_offset + num_gamers]
             client_offset += num_gamers
@@ -461,12 +436,46 @@ class AlphaZoo:
                     pred_iterations,
                     self.config.learning.player_dependent_value,
                     clients[j],
-                    profiling,
+                    Profiler(self._profiling_dir) if self.profiling else None,
                 )
                 for j in range(num_gamers)]
             all_gamers.append(gamers)
 
         return all_gamers
+    
+    def _publish_model(self) -> None:
+        cpu_state_dict = self.training_network_manager.get_state_dict("cpu")
+        ray.get(self.inference_server.publish_model.remote(
+            cpu_state_dict, self.training_network_manager.get_version()
+        ))
+
+    def _drain_record_queue(self) -> None:
+        while not self.record_queue.empty():
+            record, game_index = self.record_queue.get(block=False)
+            self.replay_buffer.save_game_record(record, game_index)
+
+    def _wait_for_delay(self, delay_period_seconds: float) -> None:
+        divisions = 20
+        small_rest = delay_period_seconds / divisions
+        for i in range(divisions):
+            time.sleep(small_rest)
+        logger.info("Delay of " + format(delay_period_seconds, '.1f') + "s completed.")
+
+    def _update_loss_history(self, step: int, public: dict[str, float]) -> None:
+        for loss_key, history_key in [
+            ("train/value_loss", "value"),
+            ("train/policy_loss", "policy"),
+            ("train/combined_loss", "combined"),
+        ]:
+            if loss_key in public:
+                self._loss_history[history_key].append((step, public[loss_key]))
+
+    def _get_metrics(self) -> dict:
+        return self.recorder.drain()
+
+    def _collect_final_metrics(self, total_run_time: float) -> None:
+        self.recorder.lifetime_scalar("time/total", total_run_time)
+        self.metrics_store.ingest([self._get_metrics()])
 
     def _collect_step_metrics(
         self,
@@ -510,36 +519,26 @@ class AlphaZoo:
         }
 
         return public
-    
-    def _publish_model(self) -> None:
-        cpu_state_dict = self.training_network_manager.get_state_dict("cpu")
-        ray.get(self.inference_server.publish_model.remote(
-            cpu_state_dict, self.training_network_manager.get_version()
-        ))
 
-    def _drain_record_queue(self) -> None:
-        while not self.record_queue.empty():
-            record, game_index = self.record_queue.get(block=False)
-            self.replay_buffer.save_game_record(record, game_index)
+    def _finalize_profiling(self, profiler: Profiler, total_run_time: float) -> None:
+        # Collect actor profiles
+        futures = [
+            gamer.get_profile_stats.remote()
+            for gamers in self._gamers for gamer in gamers
+        ]
+        actor_bytes = ray.get(futures)
+        actor_stats = profiler.merge(actor_bytes)
+        profiler.save_data_to_file(actor_stats, "actor_profile.prof")
 
-    def _wait_for_delay(self, delay_period_seconds: float) -> None:
-        divisions = 20
-        small_rest = delay_period_seconds / divisions
-        for i in range(divisions):
-            time.sleep(small_rest)
-        logger.info("Delay of " + format(delay_period_seconds, '.1f') + "s completed.")
+        # Main process profile
+        main_bytes = profiler.stop()
+        main_stats = Profiler.bytes_to_pstats(main_bytes)
+        profiler.save_data_to_file(main_stats, "main_profile.prof")
 
-    def _update_loss_history(self, step: int, public: dict[str, float]) -> None:
-        for loss_key, history_key in [
-            ("train/value_loss", "value"),
-            ("train/policy_loss", "policy"),
-            ("train/combined_loss", "combined"),
-        ]:
-            if loss_key in public:
-                self._loss_history[history_key].append((step, public[loss_key]))
+        internal = self.metrics_store.get_internal()
+        profiler.save_metrics_to_file(internal)
 
-    def _get_metrics(self) -> dict:
-        return self.recorder.drain()
-
-    def _is_profiling_active(self) -> bool:
-        return "ALPHAZOO_PROFILE" in os.environ
+        d = profiler.output_dir
+        logger.info(f"\nProfiling results: {d}/")
+        logger.info(f"  snakeviz {d}/main_profile.prof")
+        logger.info(f"  snakeviz {d}/actor_profile.prof")
