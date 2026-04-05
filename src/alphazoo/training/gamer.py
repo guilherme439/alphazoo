@@ -45,18 +45,27 @@ class Gamer:
 
         self._stopped = False
 
+    def play_games(self, num_games: int) -> None:
         if self.profiler:
             self.profiler.start()
 
-    def play_games(self, num_games: int) -> None:
         for _ in range(num_games):
             record = self._play_game()
             self.record_queue.put((record, self.game_index))
 
+        if self.profiler:
+            self.profiler.accumulate(self.profiler.stop())
+
     def play_forever(self) -> None:
+        if self.profiler:
+            self.profiler.start()
+
         while not self._stopped:
             record = self._play_game()
             self.record_queue.put((record, self.game_index))
+
+        if self.profiler:
+            self.profiler.accumulate(self.profiler.stop())
 
     def set_search_config(self, search_config: SearchConfig) -> None:
         self.search_config = search_config
@@ -71,7 +80,7 @@ class Gamer:
     def get_profile_stats(self) -> bytes:
         if self.profiler is None:
             raise RuntimeError("get_profile_stats called but profiler is not set")
-        return self.profiler.stop()
+        return self.profiler.get_accumulated()
 
     # ------------------------------------------------------------------
     # Internals

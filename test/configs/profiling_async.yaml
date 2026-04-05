@@ -1,0 +1,48 @@
+verbose: true
+
+running:
+  running_mode: "asynchronous"
+  training_steps: 100
+  num_gamers: 5
+  early_fill_per_type: 0
+  early_softmax_moves: 0
+  early_softmax_exploration: 0.5
+  early_random_exploration: 0.5
+  asynchronous:
+    update_delay: 9
+cache:
+  enabled: true
+  max_size: 8000
+learning:
+  player_dependent_value: true
+  replay_window_size: 6000
+  learning_method: "samples"
+  value_loss: "SE"
+  policy_loss: "CEL"
+  samples:
+    batch_size: 32
+    num_samples: 32
+    with_replacement: true
+    late_heavy: true
+optimizer:
+  optimizer_choice: "Adam"
+scheduler:
+  starting_lr: 0.001
+  boundaries: [10000]
+  gamma: 0.1
+search:
+  simulation:
+    mcts_simulations: 100
+    keep_subtree: true
+  uct:
+    pb_c_base: 10000
+    pb_c_init: 2.0
+  exploration:
+    number_of_softmax_moves: 0
+    epsilon_softmax_exploration: 0.04
+    epsilon_random_exploration: 0.0
+    value_factor: 1.0
+    root_exploration_distribution: "gamma"
+    root_exploration_fraction: 0.15
+    root_dist_alpha: 0.15
+    root_dist_beta: 1.0

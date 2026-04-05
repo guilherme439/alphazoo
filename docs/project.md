@@ -120,7 +120,7 @@ Metric types: `scalar` (last value), `mean` (running average), `counter` (accumu
 
 Optional wall-clock profiling of both the main process and Ray worker actors, activated by setting the `ALPHAZOO_PROFILE` environment variable.
 
-- **`Profiler`** (`profiler.py`): lightweight data collector and merger that wraps yappi. Provides `start()` / `stop()` for yappi lifecycle, `merge()` to combine multiple worker profiles, and `save_data_to_file()` / `save_metrics_to_file()` for output. All data transfer between workers and the main process uses in-memory marshaled pstat dicts (no temp files). Each Gamer actor receives its own `Profiler` instance and starts yappi in its constructor so the full call tree (including `play_forever` / `play_games`) is captured. Profiles are collected once at the end of training via `_finalize_profiling()`, which writes `main_profile.prof`, `actor_profile.prof`, and `summary.txt` to a timestamped directory under `profiling/`.
+- **`Profiler`** (`profiler.py`): lightweight data collector and merger that wraps yappi. Provides `start()` / `stop()` for yappi lifecycle, `accumulate()` / `get_accumulated()` for collecting multiple profiling spans, and `merge()` to combine multiple profiles into a single marshaled pstat blob. `save_data_to_file()` / `save_metrics_to_file()` handle output. All data transfer between workers and the main process uses in-memory marshaled pstat dicts (to avoid using temp files).Profiles are collected once at the end of training via `_finalize_profiling()`, which writes `main_profile.prof`, `actor_profile.prof`, and `summary.txt` to a timestamped directory under `profiling/`.
 
 ## Key Dependencies
 

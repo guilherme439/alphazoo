@@ -1,17 +1,15 @@
 verbose: true
 
 running:
-  running_mode: "asynchronous"
+  running_mode: "sequential"
   training_steps: 100
   num_gamers: 5
   early_fill_per_type: 0
   early_softmax_moves: 0
   early_softmax_exploration: 0.5
   early_random_exploration: 0.5
-  asynchronous:
-    update_delay: 5
-  # sequential:
-  #   num_games_per_type_per_step: 2
+  sequential:
+    num_games_per_type_per_step: 10
 cache:
   enabled: true
   max_size: 8000

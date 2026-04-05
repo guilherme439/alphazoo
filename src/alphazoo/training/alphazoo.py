@@ -324,7 +324,7 @@ class AlphaZoo:
             logger.info("\n-------------------------------------\n\n")
 
         if running_mode == "asynchronous":
-            logger.info("Waiting for gamers to finish their current games\n")
+            logger.info("Waiting for gamers to terminate\n")
             for gamers in self._gamers:
                 for gamer in gamers:
                     gamer.stop.remote()
@@ -337,7 +337,7 @@ class AlphaZoo:
         total_run_time = time.time() - run_start
         self._collect_final_metrics(total_run_time)
         if self.profiling:
-            self._finalize_profiling(profiler, total_run_time)
+            self._finalize_profiling(profiler, running_mode=running_mode)
 
         logger.info("Total run time: " + format(total_run_time / 60, '.4') + "m")
         logger.info("All done.\nExiting")
@@ -520,23 +520,22 @@ class AlphaZoo:
 
         return public
 
-    def _finalize_profiling(self, profiler: Profiler, total_run_time: float) -> None:
+    def _finalize_profiling(self, profiler: Profiler, running_mode: str | None = None) -> None:
         # Collect actor profiles
         futures = [
             gamer.get_profile_stats.remote()
             for gamers in self._gamers for gamer in gamers
         ]
-        actor_bytes = ray.get(futures)
-        actor_stats = profiler.merge(actor_bytes)
-        profiler.save_data_to_file(actor_stats, "actor_profile.prof")
+        actor_bytes_list = ray.get(futures)
+        actor_bytes = Profiler.merge(actor_bytes_list)
+        profiler.save_data_to_file(Profiler.bytes_to_pstats(actor_bytes), "actor_profile.prof")
 
         # Main process profile
         main_bytes = profiler.stop()
-        main_stats = Profiler.bytes_to_pstats(main_bytes)
-        profiler.save_data_to_file(main_stats, "main_profile.prof")
+        profiler.save_data_to_file(Profiler.bytes_to_pstats(main_bytes), "main_profile.prof")
 
         internal = self.metrics_store.get_internal()
-        profiler.save_metrics_to_file(internal)
+        profiler.save_metrics_to_file(internal, running_mode=running_mode)
 
         d = profiler.output_dir
         logger.info(f"\nProfiling results: {d}/")
