@@ -6,10 +6,14 @@ class Node:
     def __init__(self, prior: float) -> None:
         self.visit_count: int = 0
         self.prior = prior
-        self.value_sum: float = 0.0
         self.terminal_value: float | None = None
         self.children: dict[int, Node] = {}
         self.to_play: int = -1
+        self.score: float | None = None
+        self.bias: float | None = None
+        self.ucb_factor: float | None = None
+
+        self._value_sum: float = 0.0
 
     def is_terminal(self) -> bool:
         return self.terminal_value is not None
@@ -17,17 +21,17 @@ class Node:
     def expanded(self) -> bool:
         return len(self.children) > 0
 
+    def update_value(self, latest_value: float) -> None:
+        self._value_sum += latest_value
+    
     def value(self) -> float:
         if self.visit_count == 0:
             return 0.0
-        return self.value_sum / self.visit_count
+        return self._value_sum / self.visit_count
 
     def num_children(self) -> int:
         return len(self.children)
 
-    def get_visit_count(self) -> int:
-        return self.visit_count
-
     def get_child(self, action: int) -> Node:
-        # Get child based on action index
         return self.children[action]
+    

@@ -184,7 +184,6 @@ Public metrics (available in callback):
 | `train/combined_loss` | Combined loss |
 | `train/replay_buffer_size` | Replay buffer size |
 | `train/learning_rate` | Current learning rate |
-| `train/loss_history` | Dict with `value`, `policy`, `combined` lists of `(step, loss)` tuples |
 | `cache/hit_ratio` | Inference cache hit ratio |
 
 Use this callback for checkpointing, logging, or early stopping.

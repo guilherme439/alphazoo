@@ -2,14 +2,16 @@
 Search algorithm tests using a mock game for controlled, deterministic testing.
 """
 
-import numpy as np
-import pytest
 import os
 
-from alphazoo.search.node import Node
-from alphazoo.search.explorer import Explorer
+import numpy as np
+import pytest
+
 from alphazoo.configs import SearchConfig
-from .utils.mocks import MockGame, MockNet, MockInferenceClient
+from alphazoo.search.explorer import Explorer
+from alphazoo.search.node import Node
+
+from .utils.mocks import MockGame, MockInferenceClient, MockNet
 
 
 @pytest.fixture
@@ -34,7 +36,7 @@ class TestNode:
     def test_value_is_average(self):
         node = Node(0.5)
         node.visit_count = 3
-        node.value_sum = 1.5
+        node._value_sum = 1.5
         assert node.value() == pytest.approx(0.5)
 
     def test_expanded_after_adding_children(self):
@@ -131,7 +133,7 @@ class TestBackpropagate:
 
         for node in nodes:
             assert node.visit_count == 1
-            assert node.value_sum == pytest.approx(0.7)
+            assert node._value_sum == pytest.approx(0.7)
 
     def test_accumulates_across_calls(self, search_config):
         explorer = Explorer(search_config, training=False)
@@ -157,7 +159,7 @@ class TestScore:
 
         visited = Node(0.5)
         visited.visit_count = 5
-        visited.value_sum = 2.5
+        visited._value_sum = 2.5
 
         unvisited = Node(0.5)
 
@@ -176,7 +178,7 @@ class TestScore:
 
         child = Node(0.5)
         child.visit_count = 3
-        child.value_sum = 1.5
+        child._value_sum = 1.5
 
         assert explorer.score(parent_p1, child) > explorer.score(parent_p2, child)
 
@@ -202,13 +204,13 @@ class TestSelectChild:
 class TestRunMCTS:
     def test_returns_valid_action(self, search_config):
         explorer = Explorer(search_config, training=False)
-        action, _, _ = explorer.run_mcts(MockGame(), MockInferenceClient(MockNet()), Node(0))
+        action, _ = explorer.run_mcts(MockGame(), MockInferenceClient(MockNet()), Node(0))
         assert 0 <= action < 4
 
     def test_respects_action_mask(self, search_config):
         explorer = Explorer(search_config, training=False)
         game = MockGame(action_mask=[0.0, 1.0, 0.0, 1.0])
-        action, _, _ = explorer.run_mcts(game, MockInferenceClient(MockNet()), Node(0))
+        action, _ = explorer.run_mcts(game, MockInferenceClient(MockNet()), Node(0))
         assert action in {1, 3}
 
     def test_root_visits_equal_simulations(self, search_config):
@@ -240,7 +242,7 @@ class TestRunMCTS:
     def test_single_valid_action(self, search_config):
         explorer = Explorer(search_config, training=False)
         game = MockGame(action_mask=[0.0, 0.0, 1.0, 0.0])
-        action, _, _ = explorer.run_mcts(game, MockInferenceClient(MockNet()), Node(0))
+        action, _ = explorer.run_mcts(game, MockInferenceClient(MockNet()), Node(0))
         assert action == 2
 
     def test_training_mode_adds_noise_to_expanded_root(self, search_config):

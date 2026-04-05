@@ -7,10 +7,10 @@ import numpy as np
 import torch
 from scipy.special import softmax
 
-from .node import Node
 from ..configs.search_config import SearchConfig
 from ..ialphazoo_game import IAlphazooGame
 from ..inference.inference_client import InferenceClient
+from .node import Node
 
 '''
 
@@ -49,7 +49,7 @@ class Explorer:
         inference_client: InferenceClient,
         root_node: Node,
         recurrent_iterations: int = 1,
-    ) -> tuple[int, Node, float]:
+    ) -> tuple[int, Node]:
         self.inference_client = inference_client
         self.recurrent_iterations = recurrent_iterations
         search_start = root_node
@@ -75,11 +75,8 @@ class Explorer:
             value = self.evaluate(node, scratch_game)
             self.backpropagate(search_path, value)
 
-        final_root_bias = self.calculate_exploration_bias(search_start)
         action = self.select_action(game, search_start)
-
-        # final_root_bias is returned just for stats purposes
-        return action, search_start.children[action], final_root_bias
+        return action, search_start.children[action]
 
     def select_action(self, game: IAlphazooGame, node: Node) -> int:
         visit_counts: list[tuple[int, int]] = [(child.visit_count, action) for action, child in node.children.items()]
@@ -128,6 +125,8 @@ class Explorer:
     def score(self, parent: Node, child: Node) -> float:
         c = self.calculate_exploration_bias(parent)
         ucb_factor = self.calculate_ucb_factor(parent, child)
+        child.ucb_factor = ucb_factor
+        parent.bias = c
 
         confidence_score = child.prior * ucb_factor
         confidence_score = confidence_score * c
@@ -139,13 +138,14 @@ class Explorer:
         # for player 2 negative values are good
 
         value_score = value_score * value_factor
-
-        return confidence_score + value_score
+        final_score = confidence_score + value_score
+        child.score = final_score
+        return final_score
 
     def backpropagate(self, search_path: list[Node], value: float) -> None:
         for node in search_path:
             node.visit_count += 1
-            node.value_sum += value
+            node.update_value(value)
 
     def evaluate(self, node: Node, game: IAlphazooGame) -> float:
         node.to_play = game.get_current_player()

@@ -2,21 +2,22 @@
 Search algorithm tests on PettingZoo's Connect Four environment.
 """
 
-import torch.nn as nn
-import torch
-import numpy as np
-import pytest
 import os
 from copy import deepcopy
 
+import numpy as np
+import pytest
+import torch
+import torch.nn as nn
 from pettingzoo.classic import connect_four_v3
 
-from alphazoo.search.node import Node
-from alphazoo.search.explorer import Explorer
 from alphazoo.configs import SearchConfig
 from alphazoo.networks import AlphaZooNet
-from .utils.mocks import MockInferenceClient
+from alphazoo.search.explorer import Explorer
+from alphazoo.search.node import Node
+
 from .utils.helpers import make_pettingzoo_game
+from .utils.mocks import MockInferenceClient
 
 
 class ConnectFourNet(AlphaZooNet):
@@ -74,7 +75,7 @@ class TestConnectFourMCTS:
         game = make_game()
         root = Node(0)
 
-        action, _, _ = explorer.run_mcts(game, inference_client, root)
+        action, _ = explorer.run_mcts(game, inference_client, root)
         obs = game.observe()
         assert game.action_mask(obs)[action] == 1.0
 
@@ -99,7 +100,7 @@ class TestConnectFourMCTS:
         mask = game.action_mask(obs)
         assert mask[0] == 0.0, "Column 0 should be full"
 
-        action, _, _ = explorer.run_mcts(game, inference_client, Node(0))
+        action, _ = explorer.run_mcts(game, inference_client, Node(0))
         assert action != 0
 
     def test_does_not_mutate_game(self, search_config, inference_client):
@@ -122,7 +123,7 @@ class TestConnectFourMCTS:
         moves = 0
         while not game.is_terminal():
             root = Node(0)
-            action, _, _ = explorer.run_mcts(game, inference_client, root)
+            action, _ = explorer.run_mcts(game, inference_client, root)
 
             obs = game.observe()
             mask = game.action_mask(obs)
@@ -183,7 +184,7 @@ class TestConnectFourStrategic:
             game.step(1)  # p2
         assert game.get_current_player() == 1
 
-        action, _, _ = explorer.run_mcts(game, client, Node(0))
+        action, _ = explorer.run_mcts(game, client, Node(0))
         assert action == 0
 
     def test_finds_winning_move_for_player_2(self, search_config):
@@ -200,7 +201,7 @@ class TestConnectFourStrategic:
         # Now p2 to play, winning move is col 2
         assert game.get_current_player() == 2
 
-        action, _, _ = explorer.run_mcts(game, client, Node(0))
+        action, _ = explorer.run_mcts(game, client, Node(0))
         assert action == 2
 
     def test_winning_move_gets_most_visits(self, search_config):

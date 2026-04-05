@@ -17,11 +17,11 @@ class GameRecord:
         self.players: list[int] = []
         self.policies: list[np.ndarray] = []
 
-    def add_step(self, state: torch.Tensor, player: int) -> None:
+    def store_step(self, state: torch.Tensor, player: int) -> None:
         self.states.append(state)
         self.players.append(player)
 
-    def add_policy(self, root_node: Any) -> None:
+    def store_visit_counts(self, root_node: Any) -> None:
         visit_counts = np.zeros(self.num_actions, dtype=np.float32)
         for action, child in root_node.children.items():
             visit_counts[action] = child.visit_count

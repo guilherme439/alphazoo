@@ -2,21 +2,22 @@
 Search algorithm tests on PettingZoo's Tic-Tac-Toe environment.
 """
 
-import torch.nn as nn
-import torch
-import numpy as np
-import pytest
 import os
 from copy import deepcopy
 
+import numpy as np
+import pytest
+import torch
+import torch.nn as nn
 from pettingzoo.classic import tictactoe_v3
 
-from alphazoo.search.node import Node
-from alphazoo.search.explorer import Explorer
 from alphazoo.configs import SearchConfig
 from alphazoo.networks import AlphaZooNet
-from .utils.mocks import MockInferenceClient
+from alphazoo.search.explorer import Explorer
+from alphazoo.search.node import Node
+
 from .utils.helpers import make_pettingzoo_game
+from .utils.mocks import MockInferenceClient
 
 
 class TicTacToeNet(AlphaZooNet):
@@ -71,7 +72,7 @@ class TestTicTacToeMCTS:
         game = make_game()
         root = Node(0)
 
-        action, _, _ = explorer.run_mcts(game, inference_client, root)
+        action, _ = explorer.run_mcts(game, inference_client, root)
         obs = game.observe()
         assert game.action_mask(obs)[action] == 1.0
 
@@ -107,7 +108,7 @@ class TestTicTacToeMCTS:
         occupied = {i for i in range(9) if mask[i] == 0.0}
         assert occupied == {0, 4, 8}
 
-        action, _, _ = explorer.run_mcts(game, inference_client, Node(0))
+        action, _ = explorer.run_mcts(game, inference_client, Node(0))
         assert mask[action] == 1.0
 
     def test_plays_full_game_without_illegal_moves(self, search_config, inference_client):
@@ -117,7 +118,7 @@ class TestTicTacToeMCTS:
         moves = 0
         while not game.is_terminal():
             root = Node(0)
-            action, _, _ = explorer.run_mcts(game, inference_client, root)
+            action, _ = explorer.run_mcts(game, inference_client, root)
 
             obs = game.observe()
             mask = game.action_mask(obs)
@@ -147,7 +148,7 @@ class TestTicTacToeStrategic:
         # p1 to play, winning move is 8
         assert game.get_current_player() == 1
 
-        action, _, _ = explorer.run_mcts(game, client, Node(0))
+        action, _ = explorer.run_mcts(game, client, Node(0))
         assert action == 8
 
     def test_finds_winning_move_for_player_2(self, search_config):
@@ -165,7 +166,7 @@ class TestTicTacToeStrategic:
         # p2 to play, winning move is 5
         assert game.get_current_player() == 2
 
-        action, _, _ = explorer.run_mcts(game, client, Node(0))
+        action, _ = explorer.run_mcts(game, client, Node(0))
         assert action == 5
 
     def test_winning_move_gets_most_visits(self, search_config):

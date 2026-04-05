@@ -99,6 +99,7 @@ class AlphaZoo:
             "step",
             "rollout/moves",
             "rollout/games",
+            "rollout/episode_len_mean",
             "train/value_loss",
             "train/policy_loss",
             "train/combined_loss",
@@ -275,10 +276,6 @@ class AlphaZoo:
 
         # ---- MAIN TRAINING LOOP ---- #
 
-        self._loss_history: dict[str, list[tuple[int, float]]] = {
-            "value": [], "policy": [], "combined": [],
-        }
-
         steps_to_run = range(self.starting_step + 1, training_steps + 1)
         for step in steps_to_run:
             self.current_step = step
@@ -290,10 +287,8 @@ class AlphaZoo:
             elif running_mode == "asynchronous":
                 self._wait_for_delay(update_delay)
 
-            selfplay_end = time.time()
-            logger.info("\n\nLearning rate: " + str(self.scheduler.get_last_lr()[0]))
-
-            trained = self.train_network(
+            train_start = time.time()
+            self.train_network(
                 learning_method,
                 policy_loss_function,
                 value_loss_function,
@@ -302,26 +297,28 @@ class AlphaZoo:
                 use_progressive_loss,
                 batch_size
             )
-            training_end = time.time()
-
-            if running_mode == "asynchronous":
-                # TODO: rever isto
-                self._drain_record_queue()
-
-            if trained:
-                self.training_network_manager.increment_version()
-                self._publish_model()
 
             # Step end
             step_end = time.time()
-            public = self._collect_step_metrics(
-                step, step_start, selfplay_end, training_end, step_end, run_start,
+            # we need to collect metrics before publishing the model
+            # because new model will invalidate cache and clear its metrics
+            public, internal = self._collect_step_metrics(
+                step,
+                train_start - step_start,
+                step_end - train_start,
+                step_end - step_start,
+                step_end - run_start,
             )
+            self.training_network_manager.increment_version()
+            self._publish_model()
+
             if on_step_end is not None:
                 on_step_end(self, step, public)
-            self.metrics_store.clear()
-            logger.info("Step time(s): " + format(step_end - step_start, '.4'))
+
+            self._log_step_metrics(public, internal)
             logger.info("\n-------------------------------------\n\n")
+
+            self.metrics_store.clear()
 
         if running_mode == "asynchronous":
             logger.info("Waiting for gamers to terminate\n")
@@ -343,10 +340,7 @@ class AlphaZoo:
         logger.info("All done.\nExiting")
 
     def run_selfplay(self, num_games_per_type: int) -> None:
-        start = time.time()
-
         num_gamers = self.config.running.num_gamers
-        total_games = self.num_game_types * num_games_per_type
 
         base = num_games_per_type // num_gamers
         remainder = num_games_per_type % num_gamers
@@ -361,11 +355,6 @@ class AlphaZoo:
             )
         ray.get(play_futures)
 
-        total_time = time.time() - start
-        logger.info("Games: " + str(total_games) +
-                    " | Time(m): " + format(total_time / 60, '.4') +
-                    " | Avg per game(s): " + format(total_time / total_games, '.4'))
-
     def train_network(
         self,
         learning_method: str,
@@ -375,23 +364,13 @@ class AlphaZoo:
         prog_alpha: float,
         use_progressive_loss: bool,
         batch_size: int,
-    ) -> bool:
-        start = time.time()
+    ) -> None:
         self._drain_record_queue()
 
         recurrent_config = self.config.recurrent
         train_iterations = recurrent_config.train_iterations if recurrent_config is not None else 1
 
         replay_size: int = self.replay_buffer.len()
-        n_games: int = self.replay_buffer.played_games()
-
-        logger.info("\nReplay buffer: " + str(replay_size) + " positions, " + str(n_games) + " games.")
-
-        # FIXME: isto nao ta certo, se replacement for true o batch size pode ser maior
-        # Isto devia rebentar lá dentro caso não dê, por isso esta funçao nao devia ter este check nem devolver um bool
-        if replay_size < batch_size:
-            logger.info("Not enough data for training (need " + str(batch_size) + "). Skipping.")
-            return False
 
         if learning_method == "epochs":
             self.trainer.train_with_epochs(
@@ -411,9 +390,6 @@ class AlphaZoo:
                 self.config.learning.samples.with_replacement)
         else:
             raise Exception("Bad learning_method config.")
-
-        logger.info("Training time(s): " + format(time.time() - start, '.4'))
-        return True
 
     def _create_gamers(
         self,
@@ -461,15 +437,6 @@ class AlphaZoo:
             time.sleep(small_rest)
         logger.info("Delay of " + format(delay_period_seconds, '.1f') + "s completed.")
 
-    def _update_loss_history(self, step: int, public: dict[str, float]) -> None:
-        for loss_key, history_key in [
-            ("train/value_loss", "value"),
-            ("train/policy_loss", "policy"),
-            ("train/combined_loss", "combined"),
-        ]:
-            if loss_key in public:
-                self._loss_history[history_key].append((step, public[loss_key]))
-
     def _get_metrics(self) -> dict:
         return self.recorder.drain()
 
@@ -480,20 +447,11 @@ class AlphaZoo:
     def _collect_step_metrics(
         self,
         step: int,
-        step_start: float,
-        selfplay_end: float,
-        training_end: float,
-        step_end: float,
-        run_start: float,
-    ) -> dict[str, Any]:
-        self.recorder.scalar("step", step)
-        self.recorder.scalar("train/replay_buffer_size", self.replay_buffer.len())
-        self.recorder.scalar("train/learning_rate", self.scheduler.get_last_lr()[0])
-        self.recorder.scalar("time/step", step_end - step_start)
-        self.recorder.scalar("time/selfplay", selfplay_end - step_start)
-        self.recorder.scalar("time/training", training_end - selfplay_end)
-        self.recorder.lifetime_scalar("time/total", step_end - run_start)
-
+        selfplay_time: float,
+        training_time: float,
+        step_time: float,
+        total_time: float,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         futures: list[Any] = [
             gamer.get_metrics.remote()
             for gamers in self._gamers for gamer in gamers
@@ -501,24 +459,53 @@ class AlphaZoo:
         futures.append(self.inference_server.get_metrics.remote())
         remote_metrics = ray.get(futures)
 
+        self.recorder.scalar("step", step)
+        self.recorder.scalar("train/replay_buffer_size", self.replay_buffer.len())
+        self.recorder.scalar("train/replay_buffer_games", self.replay_buffer.played_games())
+        self.recorder.scalar("train/learning_rate", self.scheduler.get_last_lr()[0])
+        self.recorder.scalar("time/step", step_time)
+        self.recorder.scalar("time/selfplay", selfplay_time)
+        self.recorder.scalar("time/training", training_time)
+        self.recorder.lifetime_scalar("time/total", total_time)
+
         local_metrics = [
             self.trainer.get_metrics(),
             self._get_metrics(),
         ]
-
         self.metrics_store.ingest(remote_metrics + local_metrics)
-        public = self.metrics_store.get_public()
 
-        moves = public.get("rollout/moves", 0)
+        metrics = self.metrics_store.get_all()
+        moves = metrics.get("rollout/moves", 0)
+        games = metrics.get("rollout/games", 0)
+        self.metrics_store.add("rollout/episode_len_mean", moves / games if games > 0 else 0.0)
+
+        return self.metrics_store.get_public(), self.metrics_store.get_internal()
+
+    def _log_step_metrics(self, public: dict[str, Any], internal: dict[str, Any]) -> None:
         games = public.get("rollout/games", 0)
-        public["rollout/episode_len_mean"] = moves / games if games > 0 else 0.0
+        avg_moves = public.get("rollout/episode_len_mean", 0.0)
+        tree_size = internal.get("rollout/tree_size", 0)
+        cache_hit = public.get("cache/hit_ratio", 0.0)
+        replay_size = public.get("train/replay_buffer_size", 0)
+        replay_games = internal.get("train/replay_buffer_games", 0)
+        lr = public.get("train/learning_rate", 0.0)
+        loss = public.get("train/combined_loss", 0.0)
+        selfplay_time = internal.get("time/selfplay", 0.0)
+        training_time = internal.get("time/training", 0.0)
+        step_time = internal.get("time/step", 0.0)
 
-        self._update_loss_history(step, public)
-        public["train/loss_history"] = {
-            k: list(v) for k, v in self._loss_history.items()
-        }
-
-        return public
+        logger.info(
+            f"Games: {games} | Avg moves: {avg_moves:.1f}"
+            f" | Tree size: {tree_size:.0f} | Cache hit: {cache_hit:.2f}"
+        )
+        logger.info(
+            f"Replay buffer: {replay_size} positions, {replay_games} games."
+            f" | LR: {lr:.2e} | Loss: {loss:.4f}"
+        )
+        logger.info(
+            f"Selfplay: {selfplay_time:.3f}s | Training: {training_time:.3f}s"
+            f" | Step: {step_time:.3f}s"
+        )
 
     def _finalize_profiling(self, profiler: Profiler, running_mode: str | None = None) -> None:
         # Collect actor profiles

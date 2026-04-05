@@ -41,7 +41,7 @@ class Gamer:
 
         self.inference_client.connect()
         self.explorer = Explorer(search_config, True, player_dependent_value)
-        self.recorder = MetricsRecorder()
+        self.metrics_recorder = MetricsRecorder()
 
         self._stopped = False
 
@@ -75,7 +75,7 @@ class Gamer:
         self._stopped = True
 
     def get_metrics(self) -> dict:
-        return self.recorder.drain()
+        return self.metrics_recorder.drain()
 
     def get_profile_stats(self) -> bytes:
         if self.profiler is None:
@@ -99,17 +99,18 @@ class Gamer:
         while not game.is_terminal():
             obs = game.observe()
             state = game.obs_to_state(obs, None)
-            record.add_step(state, game.get_current_player())
+            record.store_step(state, game.get_current_player())
 
-            action_i, chosen_child, root_bias = self.explorer.run_mcts(
+            action_i, chosen_child = self.explorer.run_mcts(
                 game, self.inference_client, root_node, self.recurrent_iterations,
             )
 
-            tree_size = root_node.get_visit_count()
+            tree_size = root_node.visit_count
             node_children = root_node.num_children()
+            root_bias = root_node.bias
 
             game.step(action_i)
-            record.add_policy(root_node)
+            record.store_visit_counts(root_node)
 
             if keep_subtree:
                 root_node = chosen_child
@@ -117,14 +118,14 @@ class Gamer:
                 root_node = Node(0)
 
             move_count += 1
-            self.recorder.mean("rollout/children", node_children)
-            self.recorder.mean("rollout/tree_size", tree_size)
-            self.recorder.mean("rollout/bias", root_bias)
+            self.metrics_recorder.mean("rollout/children", node_children)
+            self.metrics_recorder.mean("rollout/tree_size", tree_size)
+            self.metrics_recorder.mean("rollout/bias", root_bias)
 
-        self.recorder.scalar("rollout/final_tree_size", tree_size)
-        self.recorder.scalar("rollout/final_bias", root_bias)
-        self.recorder.counter("rollout/moves", move_count)
-        self.recorder.counter("rollout/games", 1)
+        self.metrics_recorder.scalar("rollout/final_tree_size", tree_size)
+        self.metrics_recorder.scalar("rollout/final_bias", root_bias)
+        self.metrics_recorder.counter("rollout/moves", move_count)
+        self.metrics_recorder.counter("rollout/games", 1)
 
         terminal_value = game.get_terminal_value()
         if self.player_dependent_value and game.get_current_player() != 1:

@@ -37,6 +37,9 @@ class MetricsStore:
     def get_all(self) -> dict[str, float]:
         return self._resolve(public=None)
 
+    def add(self, key: str, value: float) -> None:
+        self._metrics[key] = MetricEntry(MetricType.SCALAR, value)
+
     def clear(self) -> None:
         self._metrics = {
             k: MetricEntry(v.type, v.value)
