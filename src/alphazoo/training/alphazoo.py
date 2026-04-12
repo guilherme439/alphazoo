@@ -51,7 +51,11 @@ class AlphaZoo:
 
         envs = env if isinstance(env, list) else [env]
         self.games = [
-            e if isinstance(e, IAlphazooGame) else PettingZooWrapper(e)
+            e if isinstance(e, IAlphazooGame) else PettingZooWrapper(
+                e,
+                observation_format=config.data.observation_format,
+                network_input_format=config.data.network_input_format,
+            )
             for e in envs
         ]
         
@@ -410,7 +414,7 @@ class AlphaZoo:
                     i,
                     search_config,
                     pred_iterations,
-                    self.config.learning.player_dependent_value,
+                    self.config.data.player_dependent_value,
                     clients[j],
                     Profiler(self._profiling_dir) if self.profiling else None,
                 )

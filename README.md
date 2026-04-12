@@ -77,6 +77,10 @@ def on_step_end(az, step, metrics):
 trainer.train(on_step_end=on_step_end)
 ```
 
+## Configuration
+
+Every config field has a default value — you only need to specify what you want to change. See the [Configuration Reference](docs/configuration.md) for a complete list of all options, or check the [example config](configs/examples/connect_four.yaml).
+
 ## Advanced Usage
 
 You can find explanations for more advanced use cases in the [documentation](docs/details.md).

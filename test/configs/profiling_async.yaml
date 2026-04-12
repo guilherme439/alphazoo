@@ -13,8 +13,9 @@ running:
 cache:
   enabled: true
   max_size: 8000
-learning:
+data:
   player_dependent_value: true
+learning:
   replay_window_size: 6000
   learning_method: "samples"
   value_loss: "SE"

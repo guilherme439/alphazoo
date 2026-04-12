@@ -25,10 +25,23 @@ class PettingZooWrapper(IAlphazooGame):
     Args:
         env: A PettingZoo AECEnv instance. May be raw or wrapped in PettingZoo's
              standard wrapper layers (OrderEnforcing, etc.).
+        observation_format: Format of the env's observations ("channels_first" or
+             "channels_last"). Defaults to "channels_last" (PettingZoo convention).
+        network_input_format: Format the network expects ("channels_first" or
+             "channels_last"). Defaults to "channels_first" (PyTorch convention).
+             When the two formats differ, obs_to_state transposes automatically.
     """
 
-    def __init__(self, env: AECEnv) -> None:
+    def __init__(
+        self,
+        env: AECEnv,
+        observation_format: str = "channels_last",
+        network_input_format: str = "channels_first",
+    ) -> None:
         self.env = env
+        self._observation_format = observation_format
+        self._network_input_format = network_input_format
+        self._needs_transpose = (observation_format != network_input_format)
         self.env.reset()
         self._step_count = 0
         self._obs_is_float32 = self._check_obs_dtype() # we check the type to avoid unnecessary convertions
@@ -105,10 +118,14 @@ class PettingZooWrapper(IAlphazooGame):
         """
         Convert a raw PettingZoo observation dict to a network input tensor.
 
-        Default: extracts ``obs["observation"]`` and returns a float32 tensor
-        with shape ``(1, *obs_shape)``.
+        For 3D+ observations, transposes axes when ``observation_format`` and
+        ``network_input_format`` differ (e.g. HWC env → CHW network).
         """
         observation = obs["observation"]
+        if observation.ndim >= 3 and self._needs_transpose:
+            return torch.from_numpy(
+                np.ascontiguousarray(observation.transpose(2, 0, 1), dtype=np.float32)
+            ).unsqueeze(0)
         if not self._obs_is_float32:
             observation = observation.astype(np.float32)
         return torch.from_numpy(observation).unsqueeze(0)

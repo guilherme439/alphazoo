@@ -52,14 +52,17 @@ When `use_progressive_loss=True`, the training loss blends the full-iteration ou
 trainer = AlphaZoo(env=connect_four_v3.env(), config=config, model=model)
 ```
 
-If the default observation processing doesn't fit your environment, subclass `PettingZooWrapper` and override the methods you need:
+The wrapper's transpose behavior is configurable via `observation_format` and `network_input_format`. For example, if your environment already outputs channels-first observations:
 
 ```python
-class MyWrapper(PettingZooWrapper):
-    def obs_to_state(self, obs, agent_id):
-        t = torch.tensor(obs["observation"], dtype=torch.float32).unsqueeze(0)
-        return t.permute(0, 3, 1, 2)  # channels-last → channels-first
+wrapper = PettingZooWrapper(
+    my_env,
+    observation_format="channels_first",
+    network_input_format="channels_first",
+)
 ```
+
+See the [Configuration Reference](configuration.md#data) for details on observation format options.
 
 ### Implementing `IAlphazooGame` from scratch
 
@@ -92,68 +95,9 @@ class MyGame(IAlphazooGame):
 
 All config is done through `AlphaZooConfig` and its nested dataclasses. Every field has a default, so you only need to specify what you want to change.
 
-A full annotated example is available at [`configs/examples/connect_four.yaml`](../configs/examples/connect_four.yaml).
+See the [Configuration Reference](configuration.md) for a complete list of all options, including the full config tree, field types, defaults, and descriptions.
 
-### Config overview
-
-```
-AlphaZooConfig
-├── verbose                 toggle training logs
-├── running: RunningConfig
-│   ├── running_mode        "sequential" | "asynchronous"
-│   ├── num_gamers          number of Ray Gamer actors for self-play
-│   ├── training_steps      total training steps
-│   ├── early_fill_per_type games to play before training starts
-│   ├── sequential: SequentialConfig
-│   │   └── num_games_per_type_per_step
-│   └── asynchronous: AsynchronousConfig
-│       └── update_delay    seconds between training steps
-├── cache: CacheConfig
-│   ├── enabled             enable/disable MCTS inference cache
-│   └── max_size            max cached positions (rounded to power of 2)
-├── recurrent: RecurrentConfig | None
-│   ├── train_iterations    recurrent steps during weight updates
-│   ├── pred_iterations     recurrent steps during self-play
-│   ├── use_progressive_loss
-│   └── prog_alpha          progressive loss blend weight
-├── learning: LearningConfig
-│   ├── player_dependent_value  see "Value Perspective" below
-│   ├── replay_window_size
-│   ├── learning_method     "samples" | "epochs"
-│   ├── value_loss          "SE" | "AE"
-│   ├── policy_loss         "CEL" | "KLD" | "MSE"
-│   ├── samples: SamplesConfig
-│   └── epochs: EpochsConfig
-├── optimizer: OptimizerConfig
-│   ├── optimizer_choice    "Adam" | "SGD"
-│   └── sgd: SGDConfig
-├── scheduler: SchedulerConfig
-│   ├── starting_lr
-│   ├── boundaries          step milestones for LR decay
-│   └── gamma               LR decay factor
-└── search: SearchConfig
-    ├── simulation: SimulationConfig
-    │   ├── mcts_simulations
-    │   └── keep_subtree
-    ├── uct: UCTConfig
-    └── exploration: ExplorationConfig
-        ├── number_of_softmax_moves
-        ├── epsilon_softmax_exploration
-        ├── epsilon_random_exploration
-        └── root_exploration_distribution  "gamma" | "dirichlet"
-```
-
-### Value perspective (`player_dependent_value`)
-
-- **`true`** (default): observations are ego-centric (plane 0 = current player's pieces). Expects both network inputs and outputs to be from the current player's perspective.
-
-- **`false`**: observations are absolute (same layout regardless of player). The network outputs values from independent perspective. Positive values are winning for P1, and negative values are winning for P2.
-
-### Running modes
-
-- **Sequential**: each training step plays a fixed number of games, then trains. Self-play and training never overlap. Deterministic and easier to debug.
-
-- **Asynchronous**: self-play workers run continuously in the background. The trainer samples from the replay buffer on a timer (`update_delay` seconds). Higher throughput but games may use slightly stale weights.
+A complete example is available at [`configs/examples/connect_four.yaml`](../configs/examples/connect_four.yaml).
 
 ---
 

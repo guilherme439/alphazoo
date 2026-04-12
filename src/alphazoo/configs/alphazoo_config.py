@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import types
 from dataclasses import dataclass, field
 from typing import Literal, Union, get_args, get_origin, get_type_hints
 
@@ -12,7 +13,8 @@ from .search_config import SearchConfig
 def _resolve_dataclass_type(tp: type) -> type | None:
     if dataclasses.is_dataclass(tp):
         return tp
-    if get_origin(tp) is Union:
+    origin = get_origin(tp)
+    if origin is Union or isinstance(tp, types.UnionType):
         for arg in get_args(tp):
             if arg is not type(None) and dataclasses.is_dataclass(arg):
                 return arg
@@ -92,8 +94,14 @@ class EpochsConfig:
 
 
 @dataclass
-class LearningConfig:
+class DataConfig:
+    observation_format: Literal["channels_first", "channels_last"] = "channels_last"
+    network_input_format: Literal["channels_first", "channels_last"] = "channels_first"
     player_dependent_value: bool = True
+
+
+@dataclass
+class LearningConfig:
     replay_window_size: int = 10000
     value_loss: Literal["SE", "AE"] = "SE"
     policy_loss: Literal["CEL", "KLD", "MSE"] = "CEL"
@@ -126,6 +134,7 @@ class SchedulerConfig:
 @dataclass
 class AlphaZooConfig:
     verbose: bool = True
+    data: DataConfig = field(default_factory=DataConfig)
     running: RunningConfig = field(default_factory=RunningConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
     learning: LearningConfig = field(default_factory=LearningConfig)

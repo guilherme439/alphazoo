@@ -29,7 +29,6 @@ class ConnectFourNet(AlphaZooNet):
         self.value_head = nn.Linear(32, 1)
 
     def forward(self, x):
-        x = x.permute(0, 3, 1, 2)
         x = torch.relu(self.conv(x))
         x = x.reshape(x.size(0), -1)
         x = torch.relu(self.fc(x))
