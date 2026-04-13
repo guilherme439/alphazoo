@@ -60,7 +60,6 @@ class AlphaZoo:
         ]
         
         self.starting_step: int = 0
-        self._replay_buffer_state = replay_buffer_state
 
         # -------------------- NETWORK SETUP ------------------- #
 
@@ -98,6 +97,23 @@ class AlphaZoo:
             self.scheduler.load_state_dict(scheduler_state_dict)
 
         self.trainer = NetworkTrainer(self.training_network_manager, self.optimizer, self.scheduler)
+
+        # -------------------- REPLAY BUFFER ------------------- #
+
+        learning_config = config.learning
+        learning_method = learning_config.learning_method
+        batch_size: int = 0
+        if learning_method == "epochs":
+            batch_size = learning_config.epochs.batch_size
+        elif learning_method == "samples":
+            batch_size = learning_config.samples.batch_size
+
+        self.replay_buffer = ReplayBuffer(learning_config.replay_window_size, batch_size)
+        if replay_buffer_state is not None:
+            self.replay_buffer.load_state(replay_buffer_state)
+
+        # ---------------------- METRICS --------------------- #
+
         self.recorder = MetricsRecorder()
         self.metrics_store = MetricsStore(public_keys={
             "step",
@@ -188,22 +204,7 @@ class AlphaZoo:
         self._inference_clients = ray.get(self.inference_server.get_clients.remote())
         self._server_future = self.inference_server.run.remote()
 
-        # ------------- BUFFERS SETUP -------------- #
-
-        replay_window_size = config.learning.replay_window_size
-        learning_method = config.learning.learning_method
-
-        batch_size: int = 0
-        if learning_method == "epochs":
-            batch_size = config.learning.epochs.batch_size
-        elif learning_method == "samples":
-            batch_size = config.learning.samples.batch_size
-
-        self.replay_buffer = ReplayBuffer(replay_window_size, batch_size)
         self.record_queue: Queue = Queue()
-        if self._replay_buffer_state is not None:
-            self.replay_buffer.load_state(self._replay_buffer_state)
-            self._replay_buffer_state = None
 
         # ------------------- LOSS FUNCTIONS ------------------- #
 
@@ -213,6 +214,9 @@ class AlphaZoo:
         value_loss_function = get_value_loss_fn(config.learning.value_loss)
 
         # --------------------- TRAINING ---------------------- #
+
+        learning_method = config.learning.learning_method
+        batch_size = self.replay_buffer.get_batch_size()
 
         if running_mode == "sequential":
             self.games_per_step = num_games_per_type_per_step * self.num_game_types
@@ -371,6 +375,7 @@ class AlphaZoo:
     ) -> None:
         self._drain_record_queue()
 
+        learning_config = self.config.learning
         recurrent_config = self.config.recurrent
         train_iterations = recurrent_config.train_iterations if recurrent_config is not None else 1
 
@@ -382,16 +387,16 @@ class AlphaZoo:
                 policy_loss_function, value_loss_function,
                 normalize_policy, train_iterations, prog_alpha,
                 use_progressive_loss,
-                self.config.learning.epochs.learning_epochs)
+                learning_config.epochs.learning_epochs)
         elif learning_method == "samples":
             self.trainer.train_with_samples(
                 self.replay_buffer, batch_size, replay_size,
                 policy_loss_function, value_loss_function,
                 normalize_policy, train_iterations, prog_alpha,
                 use_progressive_loss,
-                self.config.learning.samples.num_samples,
-                self.config.learning.samples.late_heavy,
-                self.config.learning.samples.with_replacement)
+                learning_config.samples.num_samples,
+                learning_config.samples.late_heavy,
+                learning_config.samples.with_replacement)
         else:
             raise Exception("Bad learning_method config.")
 
