@@ -32,7 +32,9 @@ Two execution modes:
 
 ### MCTS (`search/`)
 
-- `Explorer` (`explorer.py`): runs configurable simulations per decision, UCT scoring for exploration/exploitation balance
+- `Explorer` (`explorer.py`): runs configurable simulations per decision, UCT scoring for exploration/exploitation balance. Two entry points:
+  - `run_mcts(game, inference_client, root_node)` — the main internal loop used by `Gamer` during self-play, with subtree reuse across moves
+  - `select_action_with_mcts_for(env, model, search_config, obs_space_format)` — static one-shot helper for external consumers. Wraps a PettingZoo env, runs a fresh tree behind a `LocalInferenceClient` (in-process, no Ray), returns the action
 - `Node` (`node.py`): tree node with visit counts, values, children, priors
 - Action selection: softmax over visit counts early (exploration), argmax late (exploitation), with epsilon fallback
 - Dirichlet noise at root for training diversity
@@ -56,6 +58,7 @@ Ray actors for parallelism:
 - `Gamer` (`training/gamer.py`): each Gamer is a Ray actor that plays games using MCTS. Connects to the `InferenceServer` via an `InferenceClient` for neural network evaluations. Supports `play_games(n)` for sequential mode and `play_forever()`/`stop()` for async mode.
 - `InferenceServer` (`inference/inference_server.py`): centralized Ray actor that holds the model and serves inference requests. Uses named shared memory (`InferenceSlot`) for zero-copy tensor passing and named FIFO pipes for signaling. Each client gets a dedicated slot served by its own thread.
 - `InferenceClient` (`inference/inference_client.py`): lightweight handle that Gamers use to request inference. Writes states into shared memory, signals the server via a FIFO pipe, and reads results back.
+- `LocalInferenceClient` (`inference/local_inference_client.py`): in-process alternative with the same public surface, used when running MCTS outside the Ray-backed training infrastructure (e.g. from `Explorer.select_action_with_mcts_for`).
 - `ReplayBuffer`: shared training data store
 
 ### Caching (`utils/caches/`)

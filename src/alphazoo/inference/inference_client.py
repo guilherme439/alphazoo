@@ -4,10 +4,11 @@ import os
 
 from torch import Tensor
 
+from .iinference_client import IInferenceClient
 from .inference_slot import InferenceSlot
 
 
-class InferenceClient:
+class InferenceClient(IInferenceClient):
 
     def __init__(
         self,
