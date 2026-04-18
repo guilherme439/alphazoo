@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 import ray
 
@@ -28,7 +28,7 @@ class Gamer:
         recurrent_iterations: int,
         player_dependent_value: bool,
         inference_client: InferenceClient,
-        profiler: Profiler | None = None,
+        profiler: Optional[Profiler] = None,
     ) -> None:
         self.record_queue = record_queue
         self.game = game

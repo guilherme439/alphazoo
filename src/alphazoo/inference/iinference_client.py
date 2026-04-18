@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Optional
+
 from abc import ABC, abstractmethod
 
 from torch import Tensor
@@ -19,5 +21,5 @@ class IInferenceClient(ABC):
         state: Tensor,
         training: bool,
         iters_to_do: int,
-        interim_thought: Tensor | None = None,
-    ) -> tuple[tuple[Tensor, Tensor], Tensor | None]: ...
+        interim_thought: Optional[Tensor] = None,
+    ) -> tuple[tuple[Tensor, Tensor], Optional[Tensor]]: ...

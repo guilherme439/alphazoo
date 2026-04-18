@@ -1,17 +1,19 @@
 from __future__ import annotations
 
+from typing import Optional
+
 
 class Node:
 
     def __init__(self, prior: float) -> None:
         self.visit_count: int = 0
         self.prior = prior
-        self.terminal_value: float | None = None
+        self.terminal_value: Optional[float] = None
         self.children: dict[int, Node] = {}
         self.to_play: int = -1
-        self.score: float | None = None
-        self.bias: float | None = None
-        self.ucb_factor: float | None = None
+        self.score: Optional[float] = None
+        self.bias: Optional[float] = None
+        self.ucb_factor: Optional[float] = None
 
         self._value_sum: float = 0.0
 

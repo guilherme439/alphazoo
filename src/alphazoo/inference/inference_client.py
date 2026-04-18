@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Optional
+
 import os
 
 from torch import Tensor
@@ -21,8 +23,8 @@ class InferenceClient(IInferenceClient):
         self._is_recurrent = is_recurrent
         self._ready_path = ready_path
         self._done_path = done_path
-        self._ready_fd: int | None = None
-        self._done_fd: int | None = None
+        self._ready_fd: Optional[int] = None
+        self._done_fd: Optional[int] = None
 
     def connect(self) -> None:
         self._slot.connect()
@@ -43,7 +45,7 @@ class InferenceClient(IInferenceClient):
         state: Tensor,
         training: bool,
         iters_to_do: int,
-        interim_thought: Tensor | None = None,
+        interim_thought: Optional[Tensor] = None,
     ) -> tuple[tuple[Tensor, Tensor], None]:
         policy, value = self.inference(state)
         return (policy, value), None

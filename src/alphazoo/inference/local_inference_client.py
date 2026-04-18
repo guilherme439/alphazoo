@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Optional
+
 import torch
 from torch import Tensor, nn
 
@@ -32,8 +34,8 @@ class LocalInferenceClient(IInferenceClient):
         state: Tensor,
         training: bool,
         iters_to_do: int,
-        interim_thought: Tensor | None = None,
-    ) -> tuple[tuple[Tensor, Tensor], Tensor | None]:
+        interim_thought: Optional[Tensor] = None,
+    ) -> tuple[tuple[Tensor, Tensor], Optional[Tensor]]:
         with torch.no_grad():
             (policy, value), updated = self._model(state, iters_to_do, interim_thought)
         return (policy.reshape(1, -1), value.reshape(1, -1)), updated

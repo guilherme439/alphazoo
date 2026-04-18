@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import math
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 import torch
 from readerwriterlock import rwlock
@@ -81,7 +81,7 @@ class KeylessCache(Cache):
     def _extract_fingerprint(self, h: int) -> int:
         return h >> self._index_bits
 
-    def get(self, key: torch.Tensor) -> Any | None:
+    def get(self, key: torch.Tensor) -> Optional[Any]:
         h = self._hash_tensor(key)
         index = self._extract_index(h)
         fingerprint = self._extract_fingerprint(h)

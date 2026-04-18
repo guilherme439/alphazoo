@@ -6,7 +6,7 @@ import resource
 import time
 from copy import deepcopy
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 import psutil
 import ray
@@ -42,9 +42,9 @@ class AlphaZoo:
         env: AECEnv | IAlphazooGame | list[AECEnv | IAlphazooGame],
         config: AlphaZooConfig,
         model: AlphaZooNet | AlphaZooRecurrentNet,
-        optimizer_state_dict: dict | None = None,
-        scheduler_state_dict: dict | None = None,
-        replay_buffer_state: dict | None = None,
+        optimizer_state_dict: Optional[dict] = None,
+        scheduler_state_dict: Optional[dict] = None,
+        replay_buffer_state: Optional[dict] = None,
     ) -> None:
         self.config = config
         self.profiling = "ALPHAZOO_PROFILE" in os.environ
@@ -137,7 +137,7 @@ class AlphaZoo:
     def get_replay_buffer_state(self) -> dict:
         return self.replay_buffer.get_state()
 
-    def train(self, on_step_end: StepCallback | None = None) -> None:
+    def train(self, on_step_end: Optional[StepCallback] = None) -> None:
         logger.setLevel(logging.INFO if self.config.verbose else logging.WARNING)
 
         pid = os.getpid()
@@ -242,7 +242,7 @@ class AlphaZoo:
 
         run_start = time.time()
 
-        profiler: Profiler | None = None
+        profiler: Optional[Profiler] = None
         if self.profiling:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             self._profiling_dir = os.path.join("profiling", timestamp)
@@ -516,7 +516,7 @@ class AlphaZoo:
             f" | Step: {step_time:.3f}s"
         )
 
-    def _finalize_profiling(self, profiler: Profiler, running_mode: str | None = None) -> None:
+    def _finalize_profiling(self, profiler: Profiler, running_mode: Optional[str] = None) -> None:
         # Collect actor profiles
         futures = [
             gamer.get_profile_stats.remote()

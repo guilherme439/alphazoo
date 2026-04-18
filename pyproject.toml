@@ -12,12 +12,7 @@ license = {text = "MIT"}
 authors = [{name = "Guilherme Palma"}]
 keywords = ["reinforcement-learning", "alphazero", "mcts", "pettingzoo", "self-play"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
@@ -39,7 +34,6 @@ dependencies = [
 Homepage = "https://github.com/guilherme439/alphazoo"
 Documentation = "https://github.com/guilherme439/alphazoo#readme"
 Repository = "https://github.com/guilherme439/alphazoo"
-"Bug Tracker" = "https://github.com/guilherme439/alphazoo/issues"
 
 [tool.flit.module]
 name = "alphazoo"

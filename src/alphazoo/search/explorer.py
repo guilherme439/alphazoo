@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 import torch
@@ -73,7 +73,7 @@ class Explorer:
         self.training = training
         self.player_dependent_value = player_dependent_value
         self.rng = np.random.default_rng()
-        self._scratch_game: IAlphazooGame | None = None
+        self._scratch_game: Optional[IAlphazooGame] = None
 
     def run_mcts(
         self,

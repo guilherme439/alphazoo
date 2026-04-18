@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 import torch
 
@@ -14,7 +14,7 @@ class Cache(ABC):
         ...
 
     @abstractmethod
-    def get(self, key: Any) -> Any | None:
+    def get(self, key: Any) -> Optional[Any]:
         ''' Returns the value for the key, or None if the key doesn't exist '''
         ...
 

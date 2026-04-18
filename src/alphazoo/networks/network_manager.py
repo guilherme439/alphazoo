@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Optional
+
 import torch
 from torch import Tensor
 
@@ -8,7 +10,7 @@ from .interfaces import AlphaZooNet, AlphaZooRecurrentNet
 
 class NetworkManager:
 
-    def __init__(self, model: AlphaZooNet | AlphaZooRecurrentNet, device: str | None = None) -> None:
+    def __init__(self, model: AlphaZooNet | AlphaZooRecurrentNet, device: Optional[str] = None) -> None:
         if not isinstance(model, (AlphaZooNet, AlphaZooRecurrentNet)):
             raise TypeError(
                 "model must be an instance of AlphaZooNet or AlphaZooRecurrentNet. "
@@ -46,7 +48,7 @@ class NetworkManager:
         state: Tensor,
         training: bool,
         iters_to_do: int,
-        interim_thought: Tensor | None = None,
+        interim_thought: Optional[Tensor] = None,
     ) -> tuple[tuple[Tensor, Tensor], Tensor]:
         if not training:
             self.model.eval()
