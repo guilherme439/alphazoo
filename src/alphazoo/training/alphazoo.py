@@ -27,6 +27,7 @@ from ..utils.functions.general_utils import (create_optimizer,
                                              get_value_loss_fn,
                                              update_optimizer_state_dict,
                                              update_scheduler_state_dict)
+from ..utils.functions.progress import Progress
 from ..wrappers.pettingzoo_wrapper import PettingZooWrapper
 from .gamer import Gamer
 from .network_trainer import LossFunction, NetworkTrainer
@@ -278,7 +279,13 @@ class AlphaZoo:
                 gamer.set_search_config.remote(early_search_config)
                 for gamers in self._gamers for gamer in gamers
             ])
-            self.run_selfplay(early_fill_games_per_type)
+            total_early_fill = early_fill_games_per_type * self.num_game_types
+            with Progress(
+                "Early buffer fill",
+                total=total_early_fill,
+                poll_fn=self.record_queue.qsize,
+            ):
+                self.run_selfplay(early_fill_games_per_type)
             ray.get([
                 gamer.set_search_config.remote(search_config)
                 for gamers in self._gamers for gamer in gamers
@@ -451,9 +458,10 @@ class AlphaZoo:
     def _wait_for_delay(self, delay_period_seconds: float) -> None:
         divisions = 20
         small_rest = delay_period_seconds / divisions
-        for i in range(divisions):
-            time.sleep(small_rest)
-        logger.info("Delay of " + format(delay_period_seconds, '.1f') + "s completed.")
+        with Progress(f"Waiting for update delay ({delay_period_seconds:.1f}s)", total=divisions) as p:
+            for i in range(divisions):
+                time.sleep(small_rest)
+                p.update(i + 1)
 
     def _get_metrics(self) -> dict:
         return self.recorder.drain()
