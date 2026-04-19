@@ -30,19 +30,23 @@ class PettingZooWrapper(IAlphazooGame):
         network_input_format: Format the network expects ("channels_first" or
              "channels_last"). Defaults to "channels_first" (PyTorch convention).
              When the two formats differ, obs_to_state transposes automatically.
+        reset_env: Whether to reset ``env`` during construction. Pass False to
+             attach the wrapper to an env whose current state must be preserved.
     """
 
     def __init__(
         self,
         env: AECEnv,
+        reset_env: bool = True,
         observation_format: str = "channels_last",
-        network_input_format: str = "channels_first",
+        network_input_format: str = "channels_first"
     ) -> None:
         self.env = env
         self._observation_format = observation_format
         self._network_input_format = network_input_format
         self._needs_transpose = (observation_format != network_input_format)
-        self.env.reset()
+        if reset_env:
+            self.env.reset()
         self._step_count = 0
         self._obs_is_float32 = self._check_obs_dtype() # we check the type to avoid unnecessary convertions
         self._action_shape, self._num_actions = self._compute_action_info()

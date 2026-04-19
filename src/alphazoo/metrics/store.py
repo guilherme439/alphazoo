@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Optional
+
 from .types import MetricEntry, MetricType
 
 
@@ -51,7 +53,7 @@ class MetricsStore:
     # Internals
     # ------------------------------------------------------------------
 
-    def _resolve(self, public: bool | None) -> dict[str, float]:
+    def _resolve(self, public: Optional[bool]) -> dict[str, float]:
         result: dict[str, float] = {}
         for key, entry in self._metrics.items():
             if public is True and key not in self._public_keys:

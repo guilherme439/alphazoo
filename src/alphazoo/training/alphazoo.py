@@ -6,14 +6,13 @@ import resource
 import time
 from copy import deepcopy
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 import psutil
 import ray
 import torch
 from pettingzoo.utils.env import AECEnv
 from ray.util.queue import Queue
-from torch.optim.lr_scheduler import MultiStepLR
 
 from ..configs.alphazoo_config import AlphaZooConfig
 from ..ialphazoo_game import IAlphazooGame
@@ -23,8 +22,12 @@ from ..networks.interfaces import AlphaZooNet, AlphaZooRecurrentNet
 from ..networks.network_manager import NetworkManager
 from ..profiling import Profiler
 from ..utils.functions.general_utils import (create_optimizer,
+                                             create_scheduler,
                                              get_policy_loss_fn,
-                                             get_value_loss_fn)
+                                             get_value_loss_fn,
+                                             update_optimizer_state_dict,
+                                             update_scheduler_state_dict)
+from ..utils.functions.progress import Progress
 from ..wrappers.pettingzoo_wrapper import PettingZooWrapper
 from .gamer import Gamer
 from .network_trainer import LossFunction, NetworkTrainer
@@ -42,9 +45,9 @@ class AlphaZoo:
         env: AECEnv | IAlphazooGame | list[AECEnv | IAlphazooGame],
         config: AlphaZooConfig,
         model: AlphaZooNet | AlphaZooRecurrentNet,
-        optimizer_state_dict: dict | None = None,
-        scheduler_state_dict: dict | None = None,
-        replay_buffer_state: dict | None = None,
+        optimizer_state_dict: Optional[dict] = None,
+        scheduler_state_dict: Optional[dict] = None,
+        replay_buffer_state: Optional[dict] = None,
     ) -> None:
         self.config = config
         self.profiling = "ALPHAZOO_PROFILE" in os.environ
@@ -60,7 +63,6 @@ class AlphaZoo:
         ]
         
         self.starting_step: int = 0
-        self._replay_buffer_state = replay_buffer_state
 
         # -------------------- NETWORK SETUP ------------------- #
 
@@ -90,14 +92,38 @@ class AlphaZoo:
             momentum,
             nesterov
         )
-        self.scheduler = MultiStepLR(self.optimizer, milestones=scheduler_boundaries, gamma=scheduler_gamma)
+        self.scheduler = create_scheduler(
+            self.optimizer, 
+            scheduler_boundaries, 
+            scheduler_gamma
+        )
 
         if optimizer_state_dict is not None:
-            self.optimizer.load_state_dict(optimizer_state_dict)
+            updated_optimizer_state = update_optimizer_state_dict(optimizer_state_dict, self.optimizer.state_dict())
+            self.optimizer.load_state_dict(updated_optimizer_state)
+
         if scheduler_state_dict is not None:
-            self.scheduler.load_state_dict(scheduler_state_dict)
+            updated_scheduler_state = update_scheduler_state_dict(scheduler_state_dict, self.scheduler.state_dict())
+            self.scheduler.load_state_dict(updated_scheduler_state)
 
         self.trainer = NetworkTrainer(self.training_network_manager, self.optimizer, self.scheduler)
+
+        # -------------------- REPLAY BUFFER ------------------- #
+
+        learning_config = config.learning
+        learning_method = learning_config.learning_method
+        batch_size: int = 0
+        if learning_method == "epochs":
+            batch_size = learning_config.epochs.batch_size
+        elif learning_method == "samples":
+            batch_size = learning_config.samples.batch_size
+
+        self.replay_buffer = ReplayBuffer(learning_config.replay_window_size, batch_size)
+        if replay_buffer_state is not None:
+            self.replay_buffer.load_state(replay_buffer_state)
+
+        # ---------------------- METRICS --------------------- #
+
         self.recorder = MetricsRecorder()
         self.metrics_store = MetricsStore(public_keys={
             "step",
@@ -121,7 +147,7 @@ class AlphaZoo:
     def get_replay_buffer_state(self) -> dict:
         return self.replay_buffer.get_state()
 
-    def train(self, on_step_end: StepCallback | None = None) -> None:
+    def train(self, on_step_end: Optional[StepCallback] = None) -> None:
         logger.setLevel(logging.INFO if self.config.verbose else logging.WARNING)
 
         pid = os.getpid()
@@ -191,22 +217,7 @@ class AlphaZoo:
         self._inference_clients = ray.get(self.inference_server.get_clients.remote())
         self._server_future = self.inference_server.run.remote()
 
-        # ------------- BUFFERS SETUP -------------- #
-
-        replay_window_size = config.learning.replay_window_size
-        learning_method = config.learning.learning_method
-
-        batch_size: int = 0
-        if learning_method == "epochs":
-            batch_size = config.learning.epochs.batch_size
-        elif learning_method == "samples":
-            batch_size = config.learning.samples.batch_size
-
-        self.replay_buffer = ReplayBuffer(replay_window_size, batch_size)
         self.record_queue: Queue = Queue()
-        if self._replay_buffer_state is not None:
-            self.replay_buffer.load_state(self._replay_buffer_state)
-            self._replay_buffer_state = None
 
         # ------------------- LOSS FUNCTIONS ------------------- #
 
@@ -216,6 +227,9 @@ class AlphaZoo:
         value_loss_function = get_value_loss_fn(config.learning.value_loss)
 
         # --------------------- TRAINING ---------------------- #
+
+        learning_method = config.learning.learning_method
+        batch_size = self.replay_buffer.get_batch_size()
 
         if running_mode == "sequential":
             self.games_per_step = num_games_per_type_per_step * self.num_game_types
@@ -241,7 +255,7 @@ class AlphaZoo:
 
         run_start = time.time()
 
-        profiler: Profiler | None = None
+        profiler: Optional[Profiler] = None
         if self.profiling:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             self._profiling_dir = os.path.join("profiling", timestamp)
@@ -268,7 +282,13 @@ class AlphaZoo:
                 gamer.set_search_config.remote(early_search_config)
                 for gamers in self._gamers for gamer in gamers
             ])
-            self.run_selfplay(early_fill_games_per_type)
+            total_early_fill = early_fill_games_per_type * self.num_game_types
+            with Progress(
+                "Early buffer fill",
+                total=total_early_fill,
+                poll_fn=self.record_queue.qsize,
+            ):
+                self.run_selfplay(early_fill_games_per_type)
             ray.get([
                 gamer.set_search_config.remote(search_config)
                 for gamers in self._gamers for gamer in gamers
@@ -374,6 +394,7 @@ class AlphaZoo:
     ) -> None:
         self._drain_record_queue()
 
+        learning_config = self.config.learning
         recurrent_config = self.config.recurrent
         train_iterations = recurrent_config.train_iterations if recurrent_config is not None else 1
 
@@ -385,16 +406,16 @@ class AlphaZoo:
                 policy_loss_function, value_loss_function,
                 normalize_policy, train_iterations, prog_alpha,
                 use_progressive_loss,
-                self.config.learning.epochs.learning_epochs)
+                learning_config.epochs.learning_epochs)
         elif learning_method == "samples":
             self.trainer.train_with_samples(
                 self.replay_buffer, batch_size, replay_size,
                 policy_loss_function, value_loss_function,
                 normalize_policy, train_iterations, prog_alpha,
                 use_progressive_loss,
-                self.config.learning.samples.num_samples,
-                self.config.learning.samples.late_heavy,
-                self.config.learning.samples.with_replacement)
+                learning_config.samples.num_samples,
+                learning_config.samples.late_heavy,
+                learning_config.samples.with_replacement)
         else:
             raise Exception("Bad learning_method config.")
 
@@ -441,9 +462,10 @@ class AlphaZoo:
     def _wait_for_delay(self, delay_period_seconds: float) -> None:
         divisions = 20
         small_rest = delay_period_seconds / divisions
-        for i in range(divisions):
-            time.sleep(small_rest)
-        logger.info("Delay of " + format(delay_period_seconds, '.1f') + "s completed.")
+        with Progress(f"Waiting for update delay ({delay_period_seconds:.1f}s)", total=divisions) as p:
+            for i in range(divisions):
+                time.sleep(small_rest)
+                p.update(i + 1)
 
     def _get_metrics(self) -> dict:
         return self.recorder.drain()
@@ -515,7 +537,7 @@ class AlphaZoo:
             f" | Step: {step_time:.3f}s"
         )
 
-    def _finalize_profiling(self, profiler: Profiler, running_mode: str | None = None) -> None:
+    def _finalize_profiling(self, profiler: Profiler, running_mode: Optional[str] = None) -> None:
         # Collect actor profiles
         futures = [
             gamer.get_profile_stats.remote()

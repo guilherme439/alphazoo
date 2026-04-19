@@ -24,6 +24,7 @@ from .networks import AlphaZooNet, AlphaZooRecurrentNet, NetworkManager
 from .inference import InferenceServer, InferenceClient
 
 from .configs.alphazoo_config import AlphaZooConfig
+from .configs.search_config import SearchConfig
 from .metrics import MetricsRecorder, MetricsStore
 from .ialphazoo_game import IAlphazooGame
 from .wrappers.pettingzoo_wrapper import PettingZooWrapper
@@ -42,6 +43,7 @@ __all__ = [
     "InferenceServer",
     "InferenceClient",
     "AlphaZooConfig",
+    "SearchConfig",
     "MetricsRecorder",
     "MetricsStore",
     "IAlphazooGame",

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Optional
+
 from abc import ABC, abstractmethod
 
 from torch import nn, Tensor
@@ -40,7 +42,7 @@ class AlphaZooRecurrentNet(nn.Module, ABC):
         self,
         x: Tensor,
         iters_to_do: int,
-        interim_thought: Tensor | None = None,
+        interim_thought: Optional[Tensor] = None,
     ) -> tuple[tuple[Tensor, Tensor], Tensor]:
         """
         Args:

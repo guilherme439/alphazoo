@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Optional
+
 from multiprocessing.shared_memory import SharedMemory
 
 import numpy as np
@@ -29,13 +31,13 @@ class InferenceSlot:
         self._policy_name = policy_name
         self._value_name = value_name
 
-        self.input_state: Tensor | None = None
-        self.output_policy: Tensor | None = None
-        self.output_value: Tensor | None = None
+        self.input_state: Optional[Tensor] = None
+        self.output_policy: Optional[Tensor] = None
+        self.output_value: Optional[Tensor] = None
 
-        self._shm_input: SharedMemory | None = None
-        self._shm_policy: SharedMemory | None = None
-        self._shm_value: SharedMemory | None = None
+        self._shm_input: Optional[SharedMemory] = None
+        self._shm_policy: Optional[SharedMemory] = None
+        self._shm_value: Optional[SharedMemory] = None
 
     def connect(self, *, create: bool = False) -> None:
         self._shm_input = SharedMemory(name=self._input_name, create=create, size=self._state_nbytes)

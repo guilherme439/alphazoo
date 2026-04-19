@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Optional
+
 import marshal
 import os
 import pstats
@@ -60,7 +62,7 @@ class Profiler:
         stats.dump_stats(path)
         return path
 
-    def save_metrics_to_file(self, metrics: dict, running_mode: str | None = None) -> str:
+    def save_metrics_to_file(self, metrics: dict, running_mode: Optional[str] = None) -> str:
         os.makedirs(self.output_dir, exist_ok=True)
         path = os.path.join(self.output_dir, "summary.txt")
 

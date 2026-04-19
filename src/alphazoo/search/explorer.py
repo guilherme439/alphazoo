@@ -8,11 +8,15 @@ from typing import Any
 
 import numpy as np
 from scipy.special import softmax
+from torch import nn
 
 from ..configs.search_config import SearchConfig
 from ..ialphazoo_game import IAlphazooGame
-from ..inference.inference_client import InferenceClient
+from ..inference.iinference_client import IInferenceClient
+from ..inference.local_inference_client import LocalInferenceClient
+from ..wrappers.pettingzoo_wrapper import PettingZooWrapper
 from .node import Node
+from pettingzoo.utils.env import AECEnv
 
 '''
 
@@ -60,10 +64,39 @@ class Explorer:
         self._scratch_games: list[IAlphazooGame] | None = None
         self._pool = ThreadPoolExecutor(max_workers=self.num_threads)
 
+    @staticmethod
+    def select_action_with_mcts_for(
+        env: AECEnv,
+        model: nn.Module,
+        search_config: SearchConfig,
+        obs_space_format: str,
+        is_recurrent: bool = False,
+        recurrent_iterations: int = 1,
+    ) -> int:
+        """
+        One-shot MCTS entry point for external consumers.
+        """
+        game = PettingZooWrapper(
+            env,
+            observation_format=obs_space_format,
+            network_input_format="channels_first",
+            reset_env=False,
+        )
+        client = LocalInferenceClient(model, is_recurrent=is_recurrent)
+        explorer = Explorer(search_config, training=False)
+        root = Node(prior=0.0)
+        action, _ = explorer.run_mcts(
+            game=game,
+            inference_client=client,
+            root_node=root,
+            recurrent_iterations=recurrent_iterations,
+        )
+        return action
+
     def run_mcts(
         self,
         game: IAlphazooGame,
-        inference_clients: list[InferenceClient],
+        inference_clients: list[IInferenceClient],
         root_node: Node,
         recurrent_iterations: int = 1,
     ) -> tuple[int, Node]:
@@ -98,7 +131,7 @@ class Explorer:
         root: Node,
         game: IAlphazooGame,
         scratch_game: IAlphazooGame,
-        inference_client: InferenceClient,
+        inference_client: IInferenceClient,
         recurrent_iterations: int,
         simulation_counter: itertools.count,
         num_simulations: int,
@@ -111,7 +144,7 @@ class Explorer:
         root: Node,
         game: IAlphazooGame,
         scratch_game: IAlphazooGame,
-        inference_client: InferenceClient,
+        inference_client: IInferenceClient,
         recurrent_iterations: int,
     ) -> None:
         node = root

@@ -3,14 +3,14 @@ from __future__ import annotations
 import dataclasses
 import types
 from dataclasses import dataclass, field
-from typing import Literal, Union, get_args, get_origin, get_type_hints
+from typing import Literal, Union, get_args, get_origin, get_type_hints, Optional
 
 import yaml
 
 from .search_config import SearchConfig
 
 
-def _resolve_dataclass_type(tp: type) -> type | None:
+def _resolve_dataclass_type(tp: type) -> Optional[type]:
     if dataclasses.is_dataclass(tp):
         return tp
     origin = get_origin(tp)
@@ -138,7 +138,7 @@ class AlphaZooConfig:
     running: RunningConfig = field(default_factory=RunningConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
     learning: LearningConfig = field(default_factory=LearningConfig)
-    recurrent: RecurrentConfig | None = None
+    recurrent: Optional[RecurrentConfig] = None
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
