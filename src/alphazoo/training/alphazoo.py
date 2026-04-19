@@ -21,13 +21,13 @@ from ..metrics import MetricsRecorder, MetricsStore
 from ..networks.interfaces import AlphaZooNet, AlphaZooRecurrentNet
 from ..networks.network_manager import NetworkManager
 from ..profiling import Profiler
-from ..utils.functions.general_utils import (create_optimizer,
-                                             create_scheduler,
-                                             get_policy_loss_fn,
-                                             get_value_loss_fn,
-                                             update_optimizer_state_dict,
-                                             update_scheduler_state_dict)
-from ..utils.functions.progress import Progress
+from ..internal_utils.functions.general_utils import (create_optimizer,
+                                                      create_scheduler,
+                                                      get_policy_loss_fn,
+                                                      get_value_loss_fn,
+                                                      update_optimizer_state_dict,
+                                                      update_scheduler_state_dict)
+from ..internal_utils.functions.progress import Progress
 from ..wrappers.pettingzoo_wrapper import PettingZooWrapper
 from .gamer import Gamer
 from .network_trainer import LossFunction, NetworkTrainer
