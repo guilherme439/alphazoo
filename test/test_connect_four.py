@@ -49,6 +49,38 @@ def test_connect_four_seq() -> None:
     trainer.train()
 
 
+def test_connect_four_parallel_seq() -> None:
+    config_path = os.path.join(
+        os.path.dirname(__file__), "configs", "connect_four_parallel_seq_test.yaml"
+    )
+    config = AlphaZooConfig.from_yaml(config_path)
+    model = ConnectFourNet()
+
+    trainer = AlphaZoo(
+        env=connect_four_v3.env(),
+        config=config,
+        model=model,
+    )
+
+    trainer.train()
+
+
+def test_connect_four_parallel_async() -> None:
+    config_path = os.path.join(
+        os.path.dirname(__file__), "configs", "connect_four_parallel_async_test.yaml"
+    )
+    config = AlphaZooConfig.from_yaml(config_path)
+    model = ConnectFourNet()
+
+    trainer = AlphaZoo(
+        env=connect_four_v3.env(),
+        config=config,
+        model=model,
+    )
+
+    trainer.train()
+
+
 def test_connect_four_async() -> None:
     config_path = os.path.join(
         os.path.dirname(__file__), "configs", "connect_four_async_test.yaml"

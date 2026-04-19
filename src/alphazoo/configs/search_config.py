@@ -7,9 +7,17 @@ import yaml
 
 
 @dataclass
+class ParallelSearchConfig:
+    num_search_threads: int = 4
+    virtual_loss: float = 3.0
+
+
+@dataclass
 class SimulationConfig:
     mcts_simulations: int = 300
     keep_subtree: bool = True
+    parallel_search: bool = False
+    parallel: ParallelSearchConfig = field(default_factory=ParallelSearchConfig)
 
 
 @dataclass
@@ -41,7 +49,10 @@ class SearchConfig:
         with open(path, "r") as f:
             data = yaml.safe_load(f)
 
-        simulation = SimulationConfig(**data.get("simulation", {}))
+        sim_data = data.get("simulation", {})
+        parallel_data = sim_data.pop("parallel", {})
+        parallel = ParallelSearchConfig(**parallel_data)
+        simulation = SimulationConfig(**sim_data, parallel=parallel)
         uct = UCTConfig(**data.get("uct", {}))
         exploration = ExplorationConfig(**data.get("exploration", {}))
 
@@ -50,9 +61,17 @@ class SearchConfig:
     @classmethod
     def from_dict(cls, config_dict: dict[str, dict]) -> SearchConfig:
         if isinstance(config_dict, dict):
+            sim_dict = config_dict["simulation"]
+            parallel_dict = sim_dict.get("parallel", {})
+            parallel = ParallelSearchConfig(
+                num_search_threads=parallel_dict.get("num_search_threads", 4),
+                virtual_loss=parallel_dict.get("virtual_loss", 3.0),
+            )
             simulation = SimulationConfig(
-                mcts_simulations=config_dict["simulation"]["mcts_simulations"],
-                keep_subtree=config_dict["simulation"]["keep_subtree"],
+                mcts_simulations=sim_dict["mcts_simulations"],
+                keep_subtree=sim_dict["keep_subtree"],
+                parallel_search=sim_dict.get("parallel_search", False),
+                parallel=parallel,
             )
             uct = UCTConfig(
                 pb_c_base=config_dict["uct"]["pb_c_base"],

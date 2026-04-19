@@ -39,6 +39,10 @@ search:
   simulation:
     mcts_simulations: 8
     keep_subtree: false
+    parallel_search: true
+    parallel:
+      num_search_threads: 2
+      virtual_loss: 3.0
   uct:
     pb_c_base: 10000
     pb_c_init: 1.15

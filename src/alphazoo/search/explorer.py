@@ -1,18 +1,17 @@
 from __future__ import annotations
 
+import itertools
 import math
-from typing import Any, Optional
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 import numpy as np
-import torch
 from scipy.special import softmax
-from torch import nn
 
 from ..configs.search_config import SearchConfig
 from ..ialphazoo_game import IAlphazooGame
 from ..inference.iinference_client import IInferenceClient
-from ..inference.local_inference_client import LocalInferenceClient
-from ..wrappers.pettingzoo_wrapper import PettingZooWrapper
 from .node import Node
 
 '''
@@ -32,170 +31,202 @@ from .node import Node
  ⠀⠀⠀⠀⠻⣧⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⡾⠋⠀⣴⣿⠃⠀⠀⠀      ⠀⠀⠀⠀⠀⠀⠀⠘⢷⣟⠀⠀⠈⠉⠉⠉⠉⠁⠀⠀⣻⡾⠃⠀⠀⠀⠀⠀⠀⠀
  ⠀⠀⠀⠀⠀⠈⠛⢷⣤⣀⠀⠀⠀⠀⠀⠀⠀⢀⣠⡾⠋⠀⣠⣾⣿⠏⠀⠀⠀⠀      ⠀⠀⠀⠀⠀⠀⠀⠀⠈⠻⣷⣟⠀⡀⠘⠃⢀⠀⣻⣾⠟⠁⠀⠀⠀⠀⠀⠀⠀⠀
  ⠀⠀⠀⠀⠀⠀⠀⠀⠈⠉⠛⠓⠶⠶⠶⠖⠛⠋⠁⠀⠀⣴⣿⣿⠃⠀⠀⠀⠀⠀      ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠙⠿⣷⣤⣤⣾⠿⠛⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀
- ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 
 '''
 
 # The explorer runs searches.
 class Explorer:
 
-    @staticmethod
-    def select_action_with_mcts_for(
-        env: Any,
-        model: nn.Module,
+    def __init__(
+        self,
         search_config: SearchConfig,
-        obs_space_format: str,
-        is_recurrent: bool = False,
-        recurrent_iterations: int = 1,
-    ) -> int:
-        """
-        One-shot MCTS entry point for external consumers.
-        """
-        game = PettingZooWrapper(
-            env,
-            observation_format=obs_space_format,
-            network_input_format="channels_first",
-            reset_env=False,
-        )
-        client = LocalInferenceClient(model, is_recurrent=is_recurrent)
-        explorer = Explorer(search_config, training=False)
-        root = Node(prior=0.0)
-        action, _ = explorer.run_mcts(
-            game=game,
-            inference_client=client,
-            root_node=root,
-            recurrent_iterations=recurrent_iterations,
-        )
-        return action
-
-    def __init__(self, search_config: SearchConfig, training: bool, player_dependent_value: bool = True) -> None:
+        training: bool,
+        player_dependent_value: bool = True,
+        threaded: bool = False,
+    ) -> None:
         self.config = search_config
         self.training = training
         self.player_dependent_value = player_dependent_value
         self.rng = np.random.default_rng()
-        self._scratch_game: Optional[IAlphazooGame] = None
+        self.threaded = threaded
+        if threaded:
+            self.num_threads = search_config.simulation.parallel.num_search_threads
+            self.virtual_loss = search_config.simulation.parallel.virtual_loss
+        else:
+            self.num_threads = 1
+            self.virtual_loss = 0.0
+        self._tree_lock: threading.Lock | None = None
+        self._scratch_games: list[IAlphazooGame] | None = None
+        self._pool = ThreadPoolExecutor(max_workers=self.num_threads)
 
     def run_mcts(
         self,
         game: IAlphazooGame,
-        inference_client: IInferenceClient,
+        inference_clients: list[IInferenceClient],
         root_node: Node,
         recurrent_iterations: int = 1,
     ) -> tuple[int, Node]:
-        self.inference_client = inference_client
-        self.recurrent_iterations = recurrent_iterations
-        search_start = root_node
+        self._tree_lock = threading.Lock() if self.threaded else None
 
         if self.training:
-            self.add_exploration_noise(search_start)
+            self._add_exploration_noise(root_node)
 
-        num_searches: int = self.config.simulation.mcts_simulations
-        if self._scratch_game is None:
-            self._scratch_game = game.shallow_clone()
+        if self._scratch_games is None:
+            self._scratch_games = [game.shallow_clone() for _ in range(self.num_threads)]
 
-        for i in range(num_searches):
-            node = search_start
-            self._scratch_game.copy_state_from(game)
-            scratch_game = self._scratch_game
-            search_path: list[Node] = [node]
+        num_simulations: int = self.config.simulation.mcts_simulations
+        simulation_counter = itertools.count() # thread safe counter
 
-            while node.expanded():
-                action_i, node = self.select_child(node)
-                scratch_game.step(action_i)
-                search_path.append(node)
+        futures = [
+            self._pool.submit(
+                self._search_tree,
+                root_node, game, self._scratch_games[i],
+                inference_clients[i], recurrent_iterations,
+                simulation_counter, num_simulations,
+            )
+            for i in range(self.num_threads)
+        ]
+        for f in futures:
+            f.result()
 
-            value = self.evaluate(node, scratch_game)
-            self.backpropagate(search_path, value)
+        action = self._select_action(game, root_node)
+        return action, root_node.get_child(action)
 
-        action = self.select_action(game, search_start)
-        return action, search_start.children[action]
+    def _search_tree(
+        self,
+        root: Node,
+        game: IAlphazooGame,
+        scratch_game: IAlphazooGame,
+        inference_client: IInferenceClient,
+        recurrent_iterations: int,
+        simulation_counter: itertools.count,
+        num_simulations: int,
+    ) -> None:
+        while next(simulation_counter) < num_simulations:
+            self._run_simulation(root, game, scratch_game, inference_client, recurrent_iterations)
 
-    def select_action(self, game: IAlphazooGame, node: Node) -> int:
-        visit_counts: list[tuple[int, int]] = [(child.visit_count, action) for action, child in node.children.items()]
+    def _run_simulation(
+        self,
+        root: Node,
+        game: IAlphazooGame,
+        scratch_game: IAlphazooGame,
+        inference_client: IInferenceClient,
+        recurrent_iterations: int,
+    ) -> None:
+        node = root
+        scratch_game.copy_state_from(game)
+        search_path: list[Node] = [node]
 
-        if self.training:
-            if game.get_length() < self.config.exploration.number_of_softmax_moves:
-                action_i = self.softmax_action(visit_counts)
-            else:
-                epsilon_softmax = self.rng.random()
-                epsilon_random = self.rng.random()
-                softmax_threshold: float = self.config.exploration.epsilon_softmax_exploration
-                random_threshold: float = self.config.exploration.epsilon_random_exploration
+        while True:
+            match node.check_state():
+                case Node.State.EXPANDED:
+                    node = self._select_next_node(node, search_path, scratch_game)
+                    continue
+                case Node.State.EXPANDING:
+                    node.wait_for_expansion()
+                    continue
+                case Node.State.UNEXPANDED:
+                    if node.is_terminal():
+                        value = node.terminal_value()
+                    else:
+                        value = self._expand_node(node, scratch_game, inference_client, recurrent_iterations)
 
-                if epsilon_softmax < softmax_threshold:
-                    action_i = self.softmax_action(visit_counts)
-                elif epsilon_random < random_threshold:
-                    obs = game.observe()
-                    valid_actions_mask = game.action_mask(obs).flatten()
-                    n_valids = np.sum(valid_actions_mask)
-                    probs = valid_actions_mask / n_valids
-                    action_i = int(self.rng.choice(game.get_action_size(), p=probs))
-                else:
-                    action_i = self.max_action(visit_counts)
-        else:
-            action_i = self.max_action(visit_counts)
+                    value = self._to_player_one_perspective(value, node)
+                    self._backpropagate(search_path, value)
+                    return
 
-        return action_i
+    def _select_next_node(
+        self,
+        node: Node,
+        search_path: list[Node],
+        scratch_game: IAlphazooGame,
+    ) -> Node:
+        action_i, next_node = self._select_child(node)
+        scratch_game.step(action_i)
+        search_path.append(next_node)
+        if self.threaded:
+            with self._tree_lock:
+                next_node.apply_virtual_loss(self.virtual_loss)
+        return next_node
 
-    def select_child(self, node: Node) -> tuple[int, Node]:
+    def _select_child(self, node: Node) -> tuple[int, Node]:
         _, action, child = max(
-            (self.score(node, child), action, child)
-            for action, child in node.children.items()
+            (self._score(node, child), action, child)
+            for action, child in node.children().items()
         )
         return action, child
 
-    def calculate_exploration_bias(self, node: Node) -> float:
-        # Relative importance between value and prior as the game progresses
-        pb_c_base: float = self.config.uct.pb_c_base
-        pb_c_init: float = self.config.uct.pb_c_init
-        return math.log((node.visit_count + pb_c_base + 1) / pb_c_base) + pb_c_init
+    def _score(self, parent: Node, child: Node) -> float:
+        c = self._calculate_exploration_bias(parent)
+        ucb_factor = self._calculate_ucb_factor(parent, child)
+        child.set_ucb_factor(ucb_factor)
+        parent.set_bias(c)
 
-    def calculate_ucb_factor(self, parent: Node, child: Node) -> float:
-        # Relative importance amongst children based on their visit counts
-        return math.sqrt(parent.visit_count) / (child.visit_count + 1)
-
-    def score(self, parent: Node, child: Node) -> float:
-        c = self.calculate_exploration_bias(parent)
-        ucb_factor = self.calculate_ucb_factor(parent, child)
-        child.ucb_factor = ucb_factor
-        parent.bias = c
-
-        confidence_score = child.prior * ucb_factor
-        confidence_score = confidence_score * c
+        confidence_score = child.prior() * ucb_factor * c
 
         value_factor: float = self.config.exploration.value_factor
         value_score = child.value()
-        if parent.to_play == 2:
+        if parent.to_play() == 2:
             value_score = -value_score
-        # for player 2 negative values are good
-
         value_score = value_score * value_factor
+
         final_score = confidence_score + value_score
-        child.score = final_score
+        child.set_score(final_score)
         return final_score
 
-    def backpropagate(self, search_path: list[Node], value: float) -> None:
-        for node in search_path:
-            node.visit_count += 1
-            node.update_value(value)
+    def _calculate_exploration_bias(self, node: Node) -> float:
+        # Relative importance between value and prior as the game progresses
+        pb_c_base: float = self.config.uct.pb_c_base
+        pb_c_init: float = self.config.uct.pb_c_init
+        return math.log((node.visit_count() + pb_c_base + 1) / pb_c_base) + pb_c_init
 
-    def evaluate(self, node: Node, game: IAlphazooGame) -> float:
-        node.to_play = game.get_current_player()
+    def _calculate_ucb_factor(self, parent: Node, child: Node) -> float:
+        # Relative importance amongst children based on their visit counts
+        return math.sqrt(parent.visit_count()) / (child.visit_count() + 1)
 
+    def _expand_node(
+        self,
+        node: Node,
+        game: IAlphazooGame,
+        inference_client: IInferenceClient,
+        recurrent_iterations: int,
+    ) -> float:
+        node.set_to_play(game.get_current_player())
+
+        # when a leaf node is reached for the first time
         if game.is_terminal():
-            value = game.get_terminal_value()
-            node.terminal_value = value
-            if self.player_dependent_value and node.to_play != 1:
-                value = -value
+            value = self._expand_leaf_node(node, game)
+            node.mark_as_unexpanded() # leaf nodes are always marked as unexpanded
+            node.finish_expansion()
             return value
 
+        value = self._expand_branch_node(node, game, inference_client, recurrent_iterations)
+        node.mark_as_expanded()
+        node.finish_expansion()
+        return value
+
+    def _expand_leaf_node(
+        self,
+        node: Node,
+        game: IAlphazooGame,
+    ) -> float:
+        value = game.get_terminal_value()
+        node.set_terminal_value(value)
+        return value
+
+    def _expand_branch_node(
+        self,
+        node: Node,
+        game: IAlphazooGame,
+        inference_client: IInferenceClient,
+        recurrent_iterations: int
+    ) -> float:
         obs = game.observe()
         state = game.obs_to_state(obs, None)
-        action_probs, predicted_value = self._eval_inference(state)
+        action_probs, predicted_value = self._eval_inference(state, inference_client, recurrent_iterations)
 
         value: float = predicted_value.item()
-        if self.player_dependent_value and node.to_play != 1:
-            value = -value
 
         # Expand the node.
         valid_actions_mask = game.action_mask(obs).flatten()
@@ -211,22 +242,67 @@ class Explorer:
 
         for i in range(game.get_action_size()):
             if valid_actions_mask[i]:
-                node.children[i] = Node(probs[i] / total)
+                node.add_child(i, Node(probs[i] / total))
 
         return value
 
-    def _eval_inference(self, state: Any) -> tuple[Any, Any]:
-        if self.inference_client.is_recurrent():
-            (policy, value), _ = self.inference_client.recurrent_inference(state, False, self.recurrent_iterations)
+    def _eval_inference(
+        self,
+        state: Any,
+        inference_client: IInferenceClient,
+        recurrent_iterations: int
+    ) -> tuple[Any, Any]:
+        if inference_client.is_recurrent():
+            (policy, value), _ = inference_client.recurrent_inference(state, False, recurrent_iterations)
         else:
-            policy, value = self.inference_client.inference(state, False)
+            policy, value = inference_client.inference(state, False)
         return softmax(policy), value
 
-    def max_action(self, visit_counts: list[tuple[int, int]]) -> int:
+    def _backpropagate(self, search_path: list[Node], value: float) -> None:
+        if self.threaded:
+            with self._tree_lock:
+                for node in search_path:
+                    node.revert_virtual_loss_and_update(self.virtual_loss, value)
+        else:
+            for node in search_path:
+                node.increment_visit_count()
+                node.update_value(value)
+
+    def _select_action(self, game: IAlphazooGame, node: Node) -> int:
+        visit_counts: list[tuple[int, int]] = [
+            (child.visit_count(), action)
+            for action, child in node.children().items()
+        ]
+
+        if self.training:
+            if game.get_length() < self.config.exploration.number_of_softmax_moves:
+                action_i = self._softmax_action(visit_counts)
+            else:
+                epsilon_softmax = self.rng.random()
+                epsilon_random = self.rng.random()
+                softmax_threshold: float = self.config.exploration.epsilon_softmax_exploration
+                random_threshold: float = self.config.exploration.epsilon_random_exploration
+
+                if epsilon_softmax < softmax_threshold:
+                    action_i = self._softmax_action(visit_counts)
+                elif epsilon_random < random_threshold:
+                    obs = game.observe()
+                    valid_actions_mask = game.action_mask(obs).flatten()
+                    n_valids = np.sum(valid_actions_mask)
+                    probs = valid_actions_mask / n_valids
+                    action_i = int(self.rng.choice(game.get_action_size(), p=probs))
+                else:
+                    action_i = self._max_action(visit_counts)
+        else:
+            action_i = self._max_action(visit_counts)
+
+        return action_i
+
+    def _max_action(self, visit_counts: list[tuple[int, int]]) -> int:
         max_pair = max(visit_counts, key=lambda pair: pair[0])
         return max_pair[1]
 
-    def softmax_action(self, visit_counts: list[tuple[int, int]]) -> int:
+    def _softmax_action(self, visit_counts: list[tuple[int, int]]) -> int:
         counts: list[int] = []
         actions: list[int] = []
         for count, action in visit_counts:
@@ -240,19 +316,22 @@ class Explorer:
         probs /= np.sum(probs) # re-normalize to improve precison
         return int(self.rng.choice(actions, p=probs))
 
-    def add_exploration_noise(self, node: Node) -> None:
+    def _add_exploration_noise(self, node: Node) -> None:
         dist_choice = self.config.exploration.root_exploration_distribution
         frac: float = self.config.exploration.root_exploration_fraction
         alpha: float = self.config.exploration.root_dist_alpha
         beta: float = self.config.exploration.root_dist_beta
 
-        actions = node.children.keys()
+        actions = node.children().keys()
         noise = self.rng.gamma(alpha, beta, len(actions))
         for a, n in zip(actions, noise):
-            node.children[a].prior = node.children[a].prior * (1 - frac) + n * frac
+            child = node.children()[a]
+            child.set_prior(child.prior() * (1 - frac) + n * frac)
 
-    def set_search_config(self, search_config: SearchConfig) -> None:
-        self.config = search_config
+    def _to_player_one_perspective(self, value: float, node: Node) -> float:
+        if self.player_dependent_value and node.to_play() != 1:
+            return -value
+        return value
 
     def __str__(self) -> str:
         return "                                                                \n \

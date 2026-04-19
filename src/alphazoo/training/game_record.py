@@ -23,8 +23,8 @@ class GameRecord:
 
     def store_visit_counts(self, root_node: Any) -> None:
         visit_counts = np.zeros(self.num_actions, dtype=np.float32)
-        for action, child in root_node.children.items():
-            visit_counts[action] = child.visit_count
+        for action, child in root_node.children().items():
+            visit_counts[action] = child.visit_count()
 
         total_visits = np.sum(visit_counts)
         if total_visits > 0:

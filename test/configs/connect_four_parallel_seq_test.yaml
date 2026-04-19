@@ -3,7 +3,7 @@ verbose: true
 running:
   running_mode: "sequential"
   num_gamers: 1
-  early_fill_per_type: 3
+  early_fill_per_type: 4
   training_steps: 10
   early_softmax_moves: 1
   early_softmax_exploration: 1.0
@@ -24,7 +24,7 @@ learning:
   policy_loss: "KLD"
   normalize_cel: false
   epochs:
-    batch_size: 16
+    batch_size: 32
     learning_epochs: 1
 
 optimizer:
@@ -39,6 +39,10 @@ search:
   simulation:
     mcts_simulations: 8
     keep_subtree: false
+    parallel_search: true
+    parallel:
+      num_search_threads: 2
+      virtual_loss: 3.0
   uct:
     pb_c_base: 10000
     pb_c_init: 1.15
