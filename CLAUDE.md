@@ -3,4 +3,5 @@
 - Do not put conversation-specific comments in the code.
 - Do not erase comments, unless they dont make sence anymore.
 - _private functions/methods should always come after public ones.
-- Make sure you have the venv activated, before running anything.
+- Make sure you have the venv activated, before running anything. (venv/bin/activate)
+- When the code and the tests disagree, first ask: is this a bug in the code, or are the tests out of date? Fix whichever is wrong. Never make implementation decisions (method names, visibility, signatures, behavior) based on what the tests happen to call — the tests follow the code, not the other way around.

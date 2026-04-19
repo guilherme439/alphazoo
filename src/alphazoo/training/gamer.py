@@ -27,7 +27,7 @@ class Gamer:
         search_config: SearchConfig,
         recurrent_iterations: int,
         player_dependent_value: bool,
-        inference_client: InferenceClient,
+        inference_clients: list[InferenceClient],
         profiler: Profiler | None = None,
     ) -> None:
         self.record_queue = record_queue
@@ -36,11 +36,18 @@ class Gamer:
         self.search_config = search_config
         self.recurrent_iterations = recurrent_iterations
         self.player_dependent_value = player_dependent_value
-        self.inference_client = inference_client
+        self.inference_clients = inference_clients
         self.profiler = profiler
 
-        self.inference_client.connect()
-        self.explorer = Explorer(search_config, True, player_dependent_value)
+        for client in self.inference_clients:
+            client.connect()
+
+        self.explorer = Explorer(
+            search_config,
+            training=True,
+            player_dependent_value=player_dependent_value,
+            threaded=search_config.simulation.parallel_search,
+        )
         self.metrics_recorder = MetricsRecorder()
 
         self._stopped = False
@@ -69,7 +76,12 @@ class Gamer:
 
     def set_search_config(self, search_config: SearchConfig) -> None:
         self.search_config = search_config
-        self.explorer = Explorer(search_config, True, self.player_dependent_value)
+        self.explorer = Explorer(
+            search_config,
+            training=True,
+            player_dependent_value=self.player_dependent_value,
+            threaded=search_config.simulation.parallel_search,
+        )
 
     def stop(self) -> None:
         self._stopped = True
@@ -90,7 +102,9 @@ class Gamer:
         self.game.reset()
         game = self.game
         num_actions = game.get_action_size()
-        keep_subtree: bool = self.search_config.simulation.keep_subtree
+
+        simulation_config = self.search_config.simulation
+        keep_subtree: bool = simulation_config.keep_subtree
 
         root_node = Node(0)
         record = GameRecord(num_actions, self.player_dependent_value)
@@ -102,12 +116,12 @@ class Gamer:
             record.store_step(state, game.get_current_player())
 
             action_i, chosen_child = self.explorer.run_mcts(
-                game, self.inference_client, root_node, self.recurrent_iterations,
+                game, self.inference_clients, root_node, self.recurrent_iterations
             )
 
-            tree_size = root_node.visit_count
+            tree_size = root_node.visit_count()
             node_children = root_node.num_children()
-            root_bias = root_node.bias
+            root_bias = root_node.bias()
 
             game.step(action_i)
             record.store_visit_counts(root_node)

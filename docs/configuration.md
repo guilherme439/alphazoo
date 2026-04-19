@@ -88,7 +88,11 @@ AlphaZooConfig
 └── search: SearchConfig
     ├── simulation: SimulationConfig
     │   ├── mcts_simulations
-    │   └── keep_subtree
+    │   ├── keep_subtree
+    │   ├── parallel_search
+    │   └── parallel: ParallelSearchConfig
+    │       ├── num_search_threads
+    │       └── virtual_loss
     ├── uct: UCTConfig
     │   ├── pb_c_base
     │   └── pb_c_init
@@ -286,6 +290,16 @@ Controls the MCTS search used during self-play.
 |-------|------|---------|-------------|
 | `mcts_simulations` | `int` | `300` | Number of MCTS simulations per move. |
 | `keep_subtree` | `bool` | `true` | Reuse the subtree from the previous move instead of building a new tree from scratch. |
+| `parallel_search` | `bool` | `false` | Enable tree-parallel MCTS. Multiple threads explore the same tree concurrently using virtual loss for diversification. |
+
+#### Parallel Search
+
+Only used when `parallel_search` is `true`. Each gamer allocates `num_search_threads` inference clients and scratch games.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `num_search_threads` | `int` | `4` | Number of threads exploring the MCTS tree concurrently per gamer. |
+| `virtual_loss` | `float` | `3.0` | Penalty applied to nodes during selection to discourage multiple threads from exploring the same path. Reverted during backpropagation. |
 
 ### UCT
 

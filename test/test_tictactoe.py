@@ -47,6 +47,38 @@ def test_tictactoe_seq() -> None:
     trainer.train()
 
 
+def test_tictactoe_parallel_seq() -> None:
+    config_path = os.path.join(
+        os.path.dirname(__file__), "configs", "tictactoe_parallel_seq_test.yaml"
+    )
+    config = AlphaZooConfig.from_yaml(config_path)
+    model = TicTacToeNet()
+
+    trainer = AlphaZoo(
+        env=tictactoe_v3.env(),
+        config=config,
+        model=model,
+    )
+
+    trainer.train()
+
+
+def test_tictactoe_parallel_async() -> None:
+    config_path = os.path.join(
+        os.path.dirname(__file__), "configs", "tictactoe_parallel_async_test.yaml"
+    )
+    config = AlphaZooConfig.from_yaml(config_path)
+    model = TicTacToeNet()
+
+    trainer = AlphaZoo(
+        env=tictactoe_v3.env(),
+        config=config,
+        model=model,
+    )
+
+    trainer.train()
+
+
 def test_tictactoe_async() -> None:
     config_path = os.path.join(
         os.path.dirname(__file__), "configs", "tictactoe_async_test.yaml"

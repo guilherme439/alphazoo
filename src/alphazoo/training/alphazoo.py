@@ -171,7 +171,10 @@ class AlphaZoo:
         state_size = self.games[0].get_state_size()
         action_size = self.games[0].get_action_size()
         is_recurrent = self.training_network_manager.is_recurrent()
-        total_clients = num_gamers * self.num_game_types
+
+        simulation_config = config.search.simulation
+        search_threads = simulation_config.parallel.num_search_threads if simulation_config.parallel_search else 1
+        total_clients = num_gamers * self.num_game_types * search_threads
 
         cpu_network_manager = NetworkManager(deepcopy(self.model), device="cpu")
         self.inference_server = InferenceServer.remote(
@@ -401,11 +404,12 @@ class AlphaZoo:
         search_config: Any,
         pred_iterations: int,
     ) -> list[list[Any]]:
+        t = search_config.simulation.parallel.num_search_threads if search_config.simulation.parallel_search else 1
         all_gamers: list[list[Any]] = []
         client_offset = 0
         for i, game in enumerate(self.games):
-            clients = self._inference_clients[client_offset:client_offset + num_gamers]
-            client_offset += num_gamers
+            clients = self._inference_clients[client_offset:client_offset + num_gamers * t]
+            client_offset += num_gamers * t
 
             gamers = [
                 Gamer.remote(
@@ -415,7 +419,7 @@ class AlphaZoo:
                     search_config,
                     pred_iterations,
                     self.config.data.player_dependent_value,
-                    clients[j],
+                    clients[j * t:(j + 1) * t],
                     Profiler(self._profiling_dir) if self.profiling else None,
                 )
                 for j in range(num_gamers)]
