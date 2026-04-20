@@ -15,7 +15,7 @@ from readerwriterlock import rwlock
 
 from ..metrics import MetricsRecorder
 from ..networks.network_manager import NetworkManager
-from ..internal_utils.functions.general_utils import create_cache
+from ..internal_utils.common import create_cache
 from .inference_client import InferenceClient
 from .inference_slot import InferenceSlot
 

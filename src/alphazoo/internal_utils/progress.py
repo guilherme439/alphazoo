@@ -16,8 +16,9 @@ class Progress:
     Auto-detects whether stdout is a TTY. TTY renders a live `\r`-redrawn bar.
     Non-TTY (piped, redirected, pytest capture) emits at most one log line per
     crossed milestone, plus a heartbeat line if no milestone is crossed within
-    `heartbeat_sec`. If the `alphazoo` logger is below INFO (i.e. non-verbose),
-    all output is suppressed.
+    `heartbeat_sec`.
+    
+    Only enabled when `alphazoo` is in verbo se mode (logger at INFO level).
 
     Two driving modes:
     - Active (default): caller drives updates via `update(value)`.
@@ -36,7 +37,7 @@ class Progress:
         milestone_pct: int = 20,
         heartbeat_sec: float = 30.0,
         poll_fn: Optional[Callable[[], int]] = None,
-        poll_interval: float = 0.5,
+        poll_interval: float = 2.0,
     ) -> None:
         self.description = description
         self.total = max(total, 0)
@@ -101,7 +102,7 @@ class Progress:
             if crossed_milestone or heartbeat_due:
                 self._last_logged_milestone = milestone
                 self._last_log_time = now
-                logger.info(f"{self.description}: {self.current}/{self.total} ({pct}%)")
+                logger.info(f"{self.description}: {pct}%")
 
     def _poll_loop(self) -> None:
         while not self._stop_event.is_set():
@@ -117,7 +118,7 @@ class Progress:
         pct = int(100 * self.current / self.total) if self.total else 0
         fill = int(self._BAR_WIDTH * pct / 100)
         bar = "█" * fill + "░" * (self._BAR_WIDTH - fill)
-        line = f"{self.description}: [{bar}] {self.current}/{self.total} ({pct}%)"
+        line = f"{self.description}: [{bar}] {pct}%"
         # trailing spaces clear any residue from a longer previous render
         sys.stdout.write("\r" + line + "   ")
         sys.stdout.flush()

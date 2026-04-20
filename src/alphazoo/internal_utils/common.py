@@ -8,7 +8,7 @@ from torch import Tensor, nn
 from torch.optim import SGD, Adam, Optimizer
 from torch.optim.lr_scheduler import LRScheduler, MultiStepLR
 
-from ...inference.caches.keyless_cache import KeylessCache
+from ..inference.caches.keyless_cache import KeylessCache
 from .loss_functions import AbsoluteError, KLDivergence, MSError, SquaredError
 
 LossFunction = Callable[[Tensor, Tensor], Tensor]

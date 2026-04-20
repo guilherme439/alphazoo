@@ -17,17 +17,14 @@ from ray.util.queue import Queue
 from ..configs.alphazoo_config import AlphaZooConfig
 from ..ialphazoo_game import IAlphazooGame
 from ..inference.inference_server import InferenceServer
+from ..internal_utils.common import (
+    create_optimizer, create_scheduler, get_policy_loss_fn, get_value_loss_fn,
+    update_optimizer_state_dict, update_scheduler_state_dict)
+from ..internal_utils.progress import Progress
 from ..metrics import MetricsRecorder, MetricsStore
 from ..networks.interfaces import AlphaZooNet, AlphaZooRecurrentNet
 from ..networks.network_manager import NetworkManager
 from ..profiling import Profiler
-from ..internal_utils.functions.general_utils import (create_optimizer,
-                                                      create_scheduler,
-                                                      get_policy_loss_fn,
-                                                      get_value_loss_fn,
-                                                      update_optimizer_state_dict,
-                                                      update_scheduler_state_dict)
-from ..internal_utils.functions.progress import Progress
 from ..wrappers.pettingzoo_wrapper import PettingZooWrapper
 from .gamer import Gamer
 from .network_trainer import LossFunction, NetworkTrainer
@@ -272,7 +269,6 @@ class AlphaZoo:
         # ---- EARLY FILL ---- #
 
         if early_fill_games_per_type > 0:
-            logger.info("\n\n\n\nEarly Buffer Fill\n")
             early_search_config = deepcopy(self.config.search)
             early_search_config.exploration.number_of_softmax_moves = self.config.running.early_softmax_moves
             early_search_config.exploration.epsilon_softmax_exploration = self.config.running.early_softmax_exploration
