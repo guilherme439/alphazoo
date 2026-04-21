@@ -19,7 +19,7 @@ from ..ialphazoo_game import IAlphazooGame
 from ..inference.inference_server import InferenceServer
 from ..internal_utils.common import (
     create_optimizer, create_scheduler, get_policy_loss_fn, get_value_loss_fn,
-    update_optimizer_state_dict, update_scheduler_state_dict)
+    sync_optimizer_lr)
 from ..internal_utils.progress import Progress
 from ..metrics import MetricsRecorder, MetricsStore
 from ..networks.interfaces import AlphaZooNet, AlphaZooRecurrentNet
@@ -46,6 +46,8 @@ class AlphaZoo:
         scheduler_state_dict: Optional[dict] = None,
         replay_buffer_state: Optional[dict] = None,
     ) -> None:
+        """When `optimizer_state_dict` or `scheduler_state_dict` is provided, the
+        corresponding section of `config` (`optimizer` / `scheduler`) is ignored."""
         self.config = config
         self.profiling = "ALPHAZOO_PROFILE" in os.environ
 
@@ -95,13 +97,12 @@ class AlphaZoo:
             scheduler_gamma
         )
 
-        if optimizer_state_dict is not None:
-            updated_optimizer_state = update_optimizer_state_dict(optimizer_state_dict, self.optimizer.state_dict())
-            self.optimizer.load_state_dict(updated_optimizer_state)
-
         if scheduler_state_dict is not None:
-            updated_scheduler_state = update_scheduler_state_dict(scheduler_state_dict, self.scheduler.state_dict())
-            self.scheduler.load_state_dict(updated_scheduler_state)
+            self.scheduler.load_state_dict(scheduler_state_dict)
+
+        if optimizer_state_dict is not None:
+            self.optimizer.load_state_dict(optimizer_state_dict)
+            sync_optimizer_lr(self.optimizer, self.scheduler)
 
         self.trainer = NetworkTrainer(self.training_network_manager, self.optimizer, self.scheduler)
 

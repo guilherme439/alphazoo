@@ -150,3 +150,5 @@ trainer = AlphaZoo(
 trainer.starting_step = checkpoint["iteration"]
 trainer.train()
 ```
+
+When an `optimizer_state_dict` or `scheduler_state_dict` is passed, the matching `config` section (`optimizer` / `scheduler`) is ignored. If you do not pass either it will be rebuild from config again.

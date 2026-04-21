@@ -80,37 +80,7 @@ def create_scheduler(
     return MultiStepLR(optimizer, milestones=boundaries, gamma=gamma)
 
 
-def update_scheduler_state_dict(old: dict, new: dict) -> dict:
-    """
-    Updates config based scheduler parameters while keeping internal state.
-    """
-    keys_to_update = ("milestones", "gamma", "base_lrs")
-    old_dict_subset = {k: old.get(k) for k in keys_to_update}
-    new_dict_subset = {k: new.get(k) for k in keys_to_update}
-    if old_dict_subset == new_dict_subset:
-        return old
-    
-    changed = [k for k in keys_to_update if old_dict_subset[k] != new_dict_subset[k]]
-    logger.info(f"Scheduler config changed. Updated: {', '.join(changed)}")
-    return {**old, **new_dict_subset}
-
-
-def update_optimizer_state_dict(old: dict, new: dict) -> dict:
-    """
-    Updates config based optimizer parameters while keeping internal state.
-    """
-    keys_to_update = ("weight_decay", "momentum", "nesterov")
-    filter_keys = lambda d: [
-        {k: pg.get(k) for k in keys_to_update}
-        for pg in d.get("param_groups", [])
-    ]
-    old_dict_subset = {"param_groups": filter_keys(old)}
-    new_dict_subset = {"param_groups": filter_keys(new)}
-    if old_dict_subset == new_dict_subset:
-        return old
-
-    old_groups = old.get("param_groups", [])
-    new_groups_filtered = new_dict_subset.get("param_groups", [])
-    merged_groups = [{**og, **ng} for og, ng in zip(old_groups, new_groups_filtered)]
-    logger.info("Optimizer config changed.")
-    return {**old, "param_groups": merged_groups}
+def sync_optimizer_lr(optimizer: Optimizer, scheduler: LRScheduler) -> None:
+    """Overwrite the optimizer's per-param-group lr with the scheduler's current lr."""
+    for pg, lr in zip(optimizer.param_groups, scheduler.get_last_lr()):
+        pg["lr"] = lr
