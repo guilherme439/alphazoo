@@ -10,7 +10,7 @@ Optimized Standalone AlphaZero implementation with native support for [PettingZo
 &nbsp;&nbsp;&nbsp;&nbsp; ✅ &nbsp; Works with **any game** and **any network**.  
 &nbsp;&nbsp;&nbsp;&nbsp; ✅ &nbsp; Can run **sequential** or fully **asynchronously** (uses [Ray](https://github.com/ray-project/ray) under the hood).  
 &nbsp;&nbsp;&nbsp;&nbsp; ✅ &nbsp; **GPU-accelerated** training and inference.  
-&nbsp;&nbsp;&nbsp;&nbsp; ✅ &nbsp; Optimized for throughput: dedicated **inference server**, **shared-memory IPC**, and specialized **inference cache**.
+&nbsp;&nbsp;&nbsp;&nbsp; ✅ &nbsp; High-throughput via **inference server** with **shared-memory IPC** and **inference cache**.
 
 ### Beyond AlphaZero 
 
