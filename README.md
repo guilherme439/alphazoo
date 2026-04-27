@@ -55,7 +55,7 @@ config = AlphaZooConfig(
         running_mode="sequential",
         num_gamers=4,
         training_steps=500,
-        sequential=SequentialConfig(num_games_per_type_per_step=12),
+        sequential=SequentialConfig(num_games_per_step=12),
     ),
 )
 

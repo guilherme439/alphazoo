@@ -26,7 +26,6 @@ dependencies = [
     "psutil~=5.9",
     "termcolor~=2.3",
     "progress~=1.6",
-    "more_itertools~=9.0",
     "readerwriterlock~=1.0",
 ]
 

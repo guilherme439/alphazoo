@@ -3,7 +3,7 @@ verbose: true
 running:
   running_mode: "asynchronous"
   num_gamers: 2
-  early_fill_per_type: 3
+  early_fill_games: 3
   training_steps: 3
   early_softmax_moves: 3
   early_softmax_exploration: 1.0

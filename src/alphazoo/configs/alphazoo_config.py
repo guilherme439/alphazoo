@@ -43,7 +43,7 @@ def _dataclass_from_dict(cls: type, data: dict) -> object:
 
 @dataclass
 class SequentialConfig:
-    num_games_per_type_per_step: int = 12
+    num_games_per_step: int = 12
 
 
 @dataclass
@@ -61,7 +61,7 @@ class CacheConfig:
 class RunningConfig:
     running_mode: Literal["sequential", "asynchronous"] = "sequential"
     num_gamers: int = 4
-    early_fill_per_type: int = 0
+    early_fill_games: int = 0
     early_softmax_moves: int = 12
     early_softmax_exploration: float = 0.5
     early_random_exploration: float = 0.5

@@ -12,11 +12,11 @@ class ReplayBuffer:
     def __init__(self, window_size: int, batch_size: int) -> None:
         self._window_size = window_size
         self._batch_size = batch_size
-        self._buffer: list[tuple[torch.Tensor, Any, int]] = []
+        self._buffer: list[tuple[torch.Tensor, Any]] = []
         self._n_games: int = 0
         self._full: bool = False
 
-    def save_game_record(self, record: Any, game_index: int) -> None:
+    def save_game_record(self, record: Any) -> None:
         if self._n_games >= self._window_size:
             self._full = True
         else:
@@ -26,7 +26,7 @@ class ReplayBuffer:
         for i in range(len(record)):
             state = record.states[i]
             target = record.make_target(i)
-            entry = (state, target, game_index)
+            entry = (state, target)
             if self._full:
                 self._buffer.pop(0)
             self._buffer.append(entry)
@@ -34,10 +34,10 @@ class ReplayBuffer:
     def shuffle(self) -> None:
         random.shuffle(self._buffer)
 
-    def get_slice(self, start_index: int, last_index: int) -> list[tuple[torch.Tensor, Any, int]]:
+    def get_slice(self, start_index: int, last_index: int) -> list[tuple[torch.Tensor, Any]]:
         return self._buffer[start_index:last_index]
 
-    def get_sample(self, batch_size: int, replace: bool, probs: list[float]) -> list[tuple[torch.Tensor, Any, int]]:
+    def get_sample(self, batch_size: int, replace: bool, probs: list[float]) -> list[tuple[torch.Tensor, Any]]:
         if probs == []:
             args: list[Any] = [len(self._buffer), batch_size, replace]
         else:
@@ -46,7 +46,7 @@ class ReplayBuffer:
         batch_indexes = np.random.choice(*args)
         return [self._buffer[i] for i in batch_indexes]
 
-    def get_buffer(self) -> list[tuple[torch.Tensor, Any, int]]:
+    def get_buffer(self) -> list[tuple[torch.Tensor, Any]]:
         return self._buffer
     
     def get_batch_size(self) -> int:

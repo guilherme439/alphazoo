@@ -44,12 +44,12 @@ AlphaZooConfig
 │   ├── running_mode
 │   ├── num_gamers
 │   ├── training_steps
-│   ├── early_fill_per_type
+│   ├── early_fill_games
 │   ├── early_softmax_moves
 │   ├── early_softmax_exploration
 │   ├── early_random_exploration
 │   ├── sequential: SequentialConfig
-│   │   └── num_games_per_type_per_step
+│   │   └── num_games_per_step
 │   └── asynchronous: AsynchronousConfig
 │       └── update_delay
 ├── cache: CacheConfig
@@ -152,7 +152,7 @@ Controls self-play execution, parallelism, and early-game exploration.
 | `running_mode` | `"sequential"` \| `"asynchronous"` | `"sequential"` | Self-play execution mode. See [Running Modes](#running-modes). |
 | `num_gamers` | `int` | `4` | Number of Ray Gamer actors for self-play. |
 | `training_steps` | `int` | `1000` | Total training steps. |
-| `early_fill_per_type` | `int` | `0` | Games to play per player type before training starts, to fill the replay buffer. |
+| `early_fill_games` | `int` | `0` | Games to play before training starts, to fill the replay buffer. |
 | `early_softmax_moves` | `int` | `12` | Number of softmax moves during early-fill games. |
 | `early_softmax_exploration` | `float` | `0.5` | Softmax exploration temperature during early-fill games. |
 | `early_random_exploration` | `float` | `0.5` | Random exploration probability during early-fill games. |
@@ -169,7 +169,7 @@ Only used when `running_mode` is `"sequential"`.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `num_games_per_type_per_step` | `int` | `12` | Number of games played per game type per training step. |
+| `num_games_per_step` | `int` | `12` | Number of games played per training step. |
 
 ### Asynchronous
 

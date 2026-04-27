@@ -5,7 +5,6 @@ import math
 from random import randrange
 from typing import Any, Callable
 
-import more_itertools
 import torch
 from torch import Tensor, nn
 
@@ -189,9 +188,9 @@ class NetworkTrainer:
         value_loss_function: LossFunction,
         normalize_policy: bool,
     ) -> tuple[Tensor, Tensor, Tensor]:
-        states, targets, indexes = list(zip(*batch))
+        states, targets = list(zip(*batch))
         batch_input = torch.cat(states, 0)
-        batch_size = len(indexes)
+        batch_size = len(states)
         outputs = self.network_manager.inference(batch_input, True)
         return self._calculate_loss(
             outputs, targets, batch_size,
@@ -211,43 +210,39 @@ class NetworkTrainer:
         policy_loss: Tensor | float = 0.0
         combined_loss: Tensor | float = 0.0
 
-        data_by_game = more_itertools.bucket(batch, key=lambda x: x[2])
-        for index in sorted(data_by_game):
-            batch_data = list(data_by_game[index])
-            batch_size = len(batch_data)
+        states, targets = list(zip(*batch))
+        batch_size = len(states)
+        batch_input = torch.cat(states, 0)
+        recurrent_iterations = train_iterations
 
-            states, targets, indexes = list(zip(*batch_data))
-            batch_input = torch.cat(states, 0)
-            recurrent_iterations = train_iterations
+        if use_progressive_loss:
+            total_value_loss: Tensor | float = 0.0
+            total_policy_loss: Tensor | float = 0.0
+            total_combined_loss: Tensor | float = 0.0
+            prog_value_loss: Tensor | float = 0.0
+            prog_policy_loss: Tensor | float = 0.0
+            prog_combined_loss: Tensor | float = 0.0
 
-            if use_progressive_loss:
-                total_value_loss: Tensor | float = 0.0
-                total_policy_loss: Tensor | float = 0.0
-                total_combined_loss: Tensor | float = 0.0
-                prog_value_loss: Tensor | float = 0.0
-                prog_policy_loss: Tensor | float = 0.0
-                prog_combined_loss: Tensor | float = 0.0
-
-                if alpha != 1:
-                    outputs, _ = self.network_manager.recurrent_inference(batch_input, True, recurrent_iterations)
-                    total_value_loss, total_policy_loss, total_combined_loss = self._calculate_loss(
-                        outputs, targets, batch_size,
-                        policy_loss_function, value_loss_function, normalize_policy)
-
-                if alpha != 0:
-                    outputs = self._get_output_for_prog_loss(batch_input, recurrent_iterations)
-                    prog_value_loss, prog_policy_loss, prog_combined_loss = self._calculate_loss(
-                        outputs, targets, batch_size,
-                        policy_loss_function, value_loss_function, normalize_policy)
-
-                value_loss = (1 - alpha) * total_value_loss + alpha * prog_value_loss
-                policy_loss = (1 - alpha) * total_policy_loss + alpha * prog_policy_loss
-                combined_loss = (1 - alpha) * total_combined_loss + alpha * prog_combined_loss
-            else:
+            if alpha != 1:
                 outputs, _ = self.network_manager.recurrent_inference(batch_input, True, recurrent_iterations)
-                value_loss, policy_loss, combined_loss = self._calculate_loss(
+                total_value_loss, total_policy_loss, total_combined_loss = self._calculate_loss(
                     outputs, targets, batch_size,
                     policy_loss_function, value_loss_function, normalize_policy)
+
+            if alpha != 0:
+                outputs = self._get_output_for_prog_loss(batch_input, recurrent_iterations)
+                prog_value_loss, prog_policy_loss, prog_combined_loss = self._calculate_loss(
+                    outputs, targets, batch_size,
+                    policy_loss_function, value_loss_function, normalize_policy)
+
+            value_loss = (1 - alpha) * total_value_loss + alpha * prog_value_loss
+            policy_loss = (1 - alpha) * total_policy_loss + alpha * prog_policy_loss
+            combined_loss = (1 - alpha) * total_combined_loss + alpha * prog_combined_loss
+        else:
+            outputs, _ = self.network_manager.recurrent_inference(batch_input, True, recurrent_iterations)
+            value_loss, policy_loss, combined_loss = self._calculate_loss(
+                outputs, targets, batch_size,
+                policy_loss_function, value_loss_function, normalize_policy)
 
         return value_loss, policy_loss, combined_loss
 

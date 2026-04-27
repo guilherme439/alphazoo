@@ -23,7 +23,6 @@ class Gamer:
         self,
         record_queue: Any,
         game: IAlphazooGame,
-        game_index: int,
         search_config: SearchConfig,
         recurrent_iterations: int,
         player_dependent_value: bool,
@@ -32,7 +31,6 @@ class Gamer:
     ) -> None:
         self.record_queue = record_queue
         self.game = game
-        self.game_index = game_index
         self.search_config = search_config
         self.recurrent_iterations = recurrent_iterations
         self.player_dependent_value = player_dependent_value
@@ -58,7 +56,7 @@ class Gamer:
 
         for _ in range(num_games):
             record = self._play_game()
-            self.record_queue.put((record, self.game_index))
+            self.record_queue.put(record)
 
         if self.profiler:
             self.profiler.accumulate(self.profiler.stop())
@@ -69,7 +67,7 @@ class Gamer:
 
         while not self._stopped:
             record = self._play_game()
-            self.record_queue.put((record, self.game_index))
+            self.record_queue.put(record)
 
         if self.profiler:
             self.profiler.accumulate(self.profiler.stop())
