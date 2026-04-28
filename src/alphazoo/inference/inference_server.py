@@ -168,8 +168,8 @@ class InferenceServer:
             else:
                 policy, value = self._forward(state, rlock)
 
-            slot.output_policy.copy_(policy)
-            slot.output_value.copy_(value)
+            slot.output_policy.copy_(policy.view(-1))
+            slot.output_value.copy_(value.view(-1))
             os.write(done_fd, b'\x01')
 
         os.close(ready_fd)

@@ -174,7 +174,7 @@ class AlphaZoo:
             prog_alpha = 0.0
             use_progressive_loss = False
 
-        # dummy forward pass to initialize lazy layers
+        # dummy forward pass to initialize possible lazy layers
         obs = self.game.observe()
         dummy_state = self.game.obs_to_state(obs, None)
         if self.training_network_manager.is_recurrent():
