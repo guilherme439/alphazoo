@@ -35,7 +35,6 @@ class ExplorationConfig:
     root_exploration_distribution: Literal["gamma", "dirichlet"] = "gamma"
     root_exploration_fraction: float = 0.20
     root_dist_alpha: float = 0.15
-    root_dist_beta: float = 1.0
 
 
 @dataclass
@@ -85,7 +84,6 @@ class SearchConfig:
                 root_exploration_distribution=config_dict["exploration"]["root_exploration_distribution"],
                 root_exploration_fraction=config_dict["exploration"]["root_exploration_fraction"],
                 root_dist_alpha=config_dict["exploration"]["root_dist_alpha"],
-                root_dist_beta=config_dict["exploration"]["root_dist_beta"],
             )
             return cls(simulation=simulation, uct=uct, exploration=exploration)
         return config_dict  # type: ignore[return-value]

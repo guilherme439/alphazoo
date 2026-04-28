@@ -4,7 +4,7 @@ import itertools
 import math
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 from scipy.special import softmax
@@ -320,13 +320,20 @@ class Explorer:
         dist_choice = self.config.exploration.root_exploration_distribution
         frac: float = self.config.exploration.root_exploration_fraction
         alpha: float = self.config.exploration.root_dist_alpha
-        beta: float = self.config.exploration.root_dist_beta
 
+        noise_distribution = self._get_noise_distribution(dist_choice, alpha)
         actions = node.children().keys()
-        noise = self.rng.gamma(alpha, beta, len(actions))
-        for a, n in zip(actions, noise):
+        noise_per_action = noise_distribution(len(actions))
+        for a, noise in zip(actions, noise_per_action):
             child = node.children()[a]
-            child.set_prior(child.prior() * (1 - frac) + n * frac)
+            child.set_prior(child.prior() * (1 - frac) + noise * frac)
+
+    def _get_noise_distribution(self, dist_choice: str, alpha: float) -> Callable[[int], np.ndarray]:
+        if dist_choice == "dirichlet":
+            return lambda n: self.rng.dirichlet([alpha] * n)
+        if dist_choice == "gamma":
+            return lambda n: self.rng.gamma(alpha, 1.0, n)
+        raise ValueError(f"Unknown root_exploration_distribution: {dist_choice!r}")
 
     def _to_player_one_perspective(self, value: float, node: Node) -> float:
         if self.player_dependent_value and node.to_play() != 1:

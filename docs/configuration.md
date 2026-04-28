@@ -103,8 +103,7 @@ AlphaZooConfig
         ├── value_factor
         ├── root_exploration_distribution
         ├── root_exploration_fraction
-        ├── root_dist_alpha
-        └── root_dist_beta
+        └── root_dist_alpha
 ```
 
 ---
@@ -323,4 +322,3 @@ Controls move selection and noise injection during self-play.
 | `root_exploration_distribution` | `"gamma"` \| `"dirichlet"` | `"gamma"` | Distribution used for root exploration noise. |
 | `root_exploration_fraction` | `float` | `0.20` | Fraction of the prior replaced by exploration noise at the root node. |
 | `root_dist_alpha` | `float` | `0.15` | Alpha parameter of the noise distribution. Lower values produce spikier noise (more concentrated on fewer actions). |
-| `root_dist_beta` | `float` | `1.0` | Beta parameter (only used by the gamma distribution). |

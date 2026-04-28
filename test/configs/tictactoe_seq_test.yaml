@@ -50,4 +50,3 @@ search:
     root_exploration_distribution: "dirichlet"
     root_exploration_fraction: 0.25
     root_dist_alpha: 0.3
-    root_dist_beta: 1.0
