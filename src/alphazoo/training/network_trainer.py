@@ -84,10 +84,10 @@ class NetworkTrainer:
 
             logger.info("Epoch " + str(e + 1) + "/" + str(learning_epochs) + " done.")
 
-        final_v, final_p, final_c = epoch_losses[-1]
-        self.recorder.scalar("train/value_loss", final_v)
-        self.recorder.scalar("train/policy_loss", final_p)
-        self.recorder.scalar("train/combined_loss", final_c)
+        v_losses, p_losses, c_losses = zip(*epoch_losses)
+        self.recorder.scalar("train/value_loss", sum(v_losses) / len(v_losses))
+        self.recorder.scalar("train/policy_loss", sum(p_losses) / len(p_losses))
+        self.recorder.scalar("train/combined_loss", sum(c_losses) / len(c_losses))
 
         return epoch_losses
 
