@@ -358,6 +358,10 @@ class AlphaZoo:
 
         replay_size: int = self.replay_buffer.len()
 
+        if replay_size == 0:
+            logger.warning("WARNING: Replay buffer is empty; skipping training step.")
+            return
+
         if learning_method == "epochs":
             effective_batch_size = self._capped_batch_size(
                 batch_size, replay_size, self.MAX_EPOCHS_BATCH_SIZE_RATIO,

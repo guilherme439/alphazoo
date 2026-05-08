@@ -28,6 +28,7 @@ class Spinner:
     """
 
     _FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+    _DONE_FRAME = "⠿"
     _BASE_FRAME_INTERVAL = 0.1
     _MAX_FRAME_INTERVAL = 0.35
     _ANSI_RESET = "\033[0m"
@@ -68,13 +69,15 @@ class Spinner:
             self._thread.join()
         if not self._enabled:
             return
-        elapsed = time.time() - (self._start_time or time.time())
         if self._is_tty:
-            # clear the spinner line before emitting the done message
-            clear_width = len(self.description) + 8
-            sys.stdout.write("\r" + " " * clear_width + "\r")
+            color = self._color_code()
+            reset = self._ANSI_RESET if color else ""
+            line = f"{color}{self._DONE_FRAME} {self.description}{reset}"
+            sys.stdout.write("\r" + line + "   \n")
             sys.stdout.flush()
-        logger.info(f"{self.description}: done in {elapsed:.1f}s")
+        else:
+            elapsed = time.time() - (self._start_time or time.time())
+            logger.info(f"{self.description}: done in {elapsed:.1f}s")
 
     def _tick_loop(self) -> None:
         last_heartbeat = self._start_time or time.time()

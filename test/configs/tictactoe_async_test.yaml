@@ -5,7 +5,8 @@ running:
   num_gamers: 2
   training_steps: 3
   asynchronous:
-    update_delay: 1.5
+    update_delay: 10
+    min_num_games: 2
 
 cache:
   enabled: true
