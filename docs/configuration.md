@@ -51,7 +51,8 @@ AlphaZooConfig
 │   ├── sequential: SequentialConfig
 │   │   └── num_games_per_step
 │   └── asynchronous: AsynchronousConfig
-│       └── update_delay
+│       ├── update_delay
+│       └── min_num_games
 ├── cache: CacheConfig
 │   ├── enabled
 │   └── max_size
@@ -160,7 +161,7 @@ Controls self-play execution, parallelism, and early-game exploration.
 
 **Sequential**: Each training step plays a fixed number of games, then trains. Self-play and training never overlap. Deterministic and easier to debug.
 
-**Asynchronous**: Self-play workers run continuously in the background. The trainer samples from the replay buffer on a timer (`update_delay` seconds). Higher throughput, but games may use slightly stale weights.
+**Asynchronous**: Self-play workers run continuously in the background. The trainer waits between training steps for `update_delay` seconds, or — if `min_num_games` is set — exits the wait early once that many new games have been queued. Higher throughput, but games may use slightly stale weights.
 
 ### Sequential
 
@@ -176,7 +177,8 @@ Only used when `running_mode` is `"asynchronous"`.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `update_delay` | `float` | `120` | Seconds between training steps. |
+| `update_delay` | `float` | `120` | Maximum seconds to wait between training steps. |
+| `min_num_games` | `int \| None` | `None` | If set, the wait exits early once this many new games have been queued (whichever comes first with `update_delay`). When `None`, the wait always runs the full `update_delay`. |
 
 ---
 

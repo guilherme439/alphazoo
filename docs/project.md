@@ -22,13 +22,13 @@ The model must subclass either `AlphaZooNet` or `AlphaZooRecurrentNet` (both fro
 ### Training Orchestrator (`training/alphazoo.py`)
 
 `AlphaZoo` class manages the full training loop:
-1. **Self-play phase** (`run_selfplay`): Ray `Gamer` actors play games using MCTS, each connected to a centralized `InferenceServer` via shared memory. Trajectories are stored in a `ReplayBuffer`.
-2. **Network training phase** (`train_network`): samples batches from replay buffer, computes policy + value loss, backprops
+1. **Self-play phase** (`_run_selfplay`): Ray `Gamer` actors play games using MCTS, each connected to a centralized `InferenceServer` via shared memory. Trajectories are stored in a `ReplayBuffer`. Sequential mode dispatches `num_games_per_step` games to the gamer pool (`ray.util.ActorPool`) and waits for completion.
+2. **Network training phase** (`_train_network`): samples batches from replay buffer, computes policy + value loss, backprops
 3. **Model distribution**: updated weights pushed to the `InferenceServer` via `publish_model()`
 
 Two execution modes:
 - **Sequential**: fixed games per step, then train. Self-play and training never overlap.
-- **Asynchronous**: Gamers play continuously via `play_forever()`, training triggered on a timer (`update_delay`). The trainer drains the record queue each step, trains, and pushes updated weights to the inference server.
+- **Asynchronous**: Gamers play continuously via `play_forever()`. Each step, the trainer waits in `_wait_for_selfplay(update_delay, min_num_games)`: it sleeps until `update_delay` elapses, or — if `min_num_games` is set — until the record queue holds at least that many games (whichever first). The trainer then drains the record queue, trains, and pushes updated weights to the inference server.
 
 ### MCTS (`search/`)
 

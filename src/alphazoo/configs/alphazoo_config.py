@@ -49,6 +49,7 @@ class SequentialConfig:
 @dataclass
 class AsynchronousConfig:
     update_delay: float = 120
+    min_num_games: Optional[int] = None
 
 
 @dataclass
