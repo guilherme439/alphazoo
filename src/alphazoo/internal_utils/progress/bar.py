@@ -104,7 +104,7 @@ class Bar:
         pct = int(100 * self.current / self.total) if self.total else 0
         fill = int(self._BAR_WIDTH * pct / 100)
         bar = "█" * fill + "░" * (self._BAR_WIDTH - fill)
-        line = f"{self.description}: [{bar}] {pct}%"
+        line = f"{self.description}: ▏{bar}▕ {pct}%"
         # trailing spaces clear any residue from a longer previous render
         sys.stdout.write("\r" + line + "   ")
         sys.stdout.flush()

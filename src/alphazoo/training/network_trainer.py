@@ -28,6 +28,20 @@ class NetworkTrainer:
     def get_metrics(self) -> dict:
         return self.recorder.drain()
 
+    def get_late_heavy_distribution(self, replay_size: int) -> list[float]:
+        variation = 0.5
+        offset = (1 - variation) / 2
+        fraction = variation / replay_size
+
+        probs: list[float] = []
+        total = offset
+        for _ in range(replay_size):
+            total += fraction
+            probs.append(total)
+
+        total_sum = sum(probs)
+        return [p / total_sum for p in probs]
+
     def train_with_epochs(
         self,
         replay_buffer: ReplayBuffer,
@@ -41,14 +55,8 @@ class NetworkTrainer:
         use_progressive_loss: bool,
         learning_epochs: int,
     ) -> list[tuple[float, float, float]]:
-        if batch_size > replay_size:
-            raise Exception(
-                "Batch size too large.\n"
-                "If you want to use batch_size with more moves than the first batch of games played "
-                "you need to use the \"early_fill\" config to fill the replay buffer with random games at the start.\n")
-
         number_of_batches = replay_size // batch_size
-        logger.info("Batches: " + str(number_of_batches) + " | Batch size: " + str(batch_size))
+        logger.info("\nBatches: " + str(number_of_batches) + " | Batch size: " + str(batch_size))
 
         total_updates = learning_epochs * number_of_batches
         logger.info("Total updates: " + str(total_updates))
@@ -104,31 +112,19 @@ class NetworkTrainer:
         use_progressive_loss: bool,
         num_samples: int,
         late_heavy: bool,
-        replace: bool,
     ) -> tuple[float, float, float]:
         probs: list[float] = []
         if late_heavy:
-            variation = 0.5
-            num_positions = replay_size
-            offset = (1 - variation) / 2
-            fraction = variation / num_positions
-
-            total = offset
-            for _ in range(num_positions):
-                total += fraction
-                probs.append(total)
-
-            total_sum = sum(probs)
-            probs = [p / total_sum for p in probs]
+            probs = self.get_late_heavy_distribution(replay_size)
 
         average_value_loss = 0.0
         average_policy_loss = 0.0
         average_combined_loss = 0.0
 
-        logger.info("Total updates: " + str(num_samples))
+        logger.info("\nTotal updates: " + str(num_samples) + " | Batch size: " + str(batch_size))
 
         for _ in range(num_samples):
-            batch = replay_buffer.get_sample(batch_size, replace, probs)
+            batch = replay_buffer.get_sample(batch_size, probs)
 
             value_loss, policy_loss, combined_loss = self._batch_update_weights(
                 batch, policy_loss_function, value_loss_function,

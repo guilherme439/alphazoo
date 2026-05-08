@@ -62,10 +62,6 @@ class CacheConfig:
 class RunningConfig:
     running_mode: Literal["sequential", "asynchronous"] = "sequential"
     num_gamers: int = 4
-    early_fill_games: int = 0
-    early_softmax_moves: int = 12
-    early_softmax_exploration: float = 0.5
-    early_random_exploration: float = 0.5
     training_steps: int = 1000
     sequential: SequentialConfig = field(default_factory=SequentialConfig)
     asynchronous: AsynchronousConfig = field(default_factory=AsynchronousConfig)
@@ -84,7 +80,6 @@ class RecurrentConfig:
 class SamplesConfig:
     batch_size: int = 256
     num_samples: int = 32
-    with_replacement: bool = True
     late_heavy: bool = True
 
 
@@ -102,11 +97,17 @@ class DataConfig:
 
 
 @dataclass
+class ReplayBufferConfig:
+    window_size: int = 10000
+    leak_chance: float = 0.0
+
+
+@dataclass
 class LearningConfig:
-    replay_window_size: int = 10000
+    replay_buffer: ReplayBufferConfig = field(default_factory=ReplayBufferConfig)
     value_loss: Literal["SE", "AE"] = "SE"
-    policy_loss: Literal["CEL", "KLD", "MSE"] = "CEL"
-    normalize_cel: bool = False
+    policy_loss: Literal["CE", "KLD", "MSE"] = "CE"
+    normalize_ce: bool = False
     learning_method: Literal["samples", "epochs"] = "samples"
     samples: SamplesConfig = field(default_factory=SamplesConfig)
     epochs: EpochsConfig = field(default_factory=EpochsConfig)

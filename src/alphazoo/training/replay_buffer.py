@@ -9,8 +9,9 @@ import torch
 
 class ReplayBuffer:
 
-    def __init__(self, window_size: int, batch_size: int) -> None:
+    def __init__(self, window_size: int, leak_chance: float, batch_size: int) -> None:
         self._window_size = window_size
+        self._leak_chance = leak_chance
         self._batch_size = batch_size
         self._buffer: list[tuple[torch.Tensor, Any]] = []
         self._n_games: int = 0
@@ -27,7 +28,7 @@ class ReplayBuffer:
             state = record.states[i]
             target = record.make_target(i)
             entry = (state, target)
-            if self._full:
+            if self._full or self._should_leak():
                 self._buffer.pop(0)
             self._buffer.append(entry)
 
@@ -37,11 +38,11 @@ class ReplayBuffer:
     def get_slice(self, start_index: int, last_index: int) -> list[tuple[torch.Tensor, Any]]:
         return self._buffer[start_index:last_index]
 
-    def get_sample(self, batch_size: int, replace: bool, probs: list[float]) -> list[tuple[torch.Tensor, Any]]:
+    def get_sample(self, batch_size: int, probs: list[float]) -> list[tuple[torch.Tensor, Any]]:
         if probs == []:
-            args: list[Any] = [len(self._buffer), batch_size, replace]
+            args: list[Any] = [len(self._buffer), batch_size, False]
         else:
-            args = [len(self._buffer), batch_size, replace, probs]
+            args = [len(self._buffer), batch_size, False, probs]
 
         batch_indexes = np.random.choice(*args)
         return [self._buffer[i] for i in batch_indexes]
@@ -71,6 +72,9 @@ class ReplayBuffer:
         self._full = state['full']
         self._resize_to_window()
         
+    def _should_leak(self) -> bool:
+        return len(self._buffer) > 0 and random.random() < self._leak_chance
+
     def _resize_to_window(self) -> None:
         if self._n_games <= self._window_size:
             return

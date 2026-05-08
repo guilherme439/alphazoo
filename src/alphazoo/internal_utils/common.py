@@ -27,10 +27,10 @@ def create_cache(max_size: int) -> KeylessCache:
     return KeylessCache(max_size)
 
 
-def get_policy_loss_fn(choice: str, normalize_cel: bool) -> tuple[LossFunction, bool]:
+def get_policy_loss_fn(choice: str, normalize_ce: bool) -> tuple[LossFunction, bool]:
     match choice:
-        case "CEL":
-            return nn.CrossEntropyLoss(label_smoothing=0.02), normalize_cel
+        case "CE":
+            return nn.CrossEntropyLoss(label_smoothing=0.02), normalize_ce
         case "KLD":
             return KLDivergence, False
         case "MSE":

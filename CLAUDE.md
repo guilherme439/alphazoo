@@ -4,6 +4,7 @@
 - Make sure you have the venv activated, before running anything.
 - When the code and the tests disagree, first ask: is this a bug in the code, or are the tests out of date? Fix whichever is wrong. Never make implementation decisions (method names, visibility, signatures, behavior) based on what the tests happen to call — the tests follow the code, not the other way around.
 - Use descriptive variable names
+- I strongly prefer clear and readable code, even if it is more verbose.
 
 ## Imports
 
@@ -22,9 +23,7 @@
 
 ## Comments & docstrings
 
-- Do not erase comments, unless they dont make sence anymore.
 - Write docstrings for modules, public classes, and non-trivial algorithms only — skip them for self-evident code. Docstrings describe the function's contract; they should not narrate the current implementation, nor reference specific call sites that might move.
-- Do not put conversation-specific comments in the code.
 
 
 ## Output

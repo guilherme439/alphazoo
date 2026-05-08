@@ -3,11 +3,7 @@ verbose: true
 running:
   running_mode: "asynchronous"
   num_gamers: 2
-  early_fill_games: 3
   training_steps: 3
-  early_softmax_moves: 3
-  early_softmax_exploration: 1.0
-  early_random_exploration: 0.0
   asynchronous:
     update_delay: 1.5
 
@@ -19,16 +15,17 @@ data:
   player_dependent_value: true
 
 learning:
-  replay_window_size: 500
+  replay_buffer:
+    window_size: 500
+    leak_chance: 0.0
   learning_method: "samples"
   value_loss: "AE"
-  policy_loss: "CEL"
-  normalize_cel: true
+  policy_loss: "CE"
+  normalize_ce: true
   samples:
     batch_size: 16
     num_samples: 8
     late_heavy: true
-    with_replacement: false
 
 optimizer:
   optimizer_choice: "SGD"

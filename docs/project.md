@@ -1,3 +1,5 @@
+[Reference document for LLM agents only. Human-facing docs live in README.md and the rest of docs/.]
+
 # alphazoo — Project Overview
 
 Standalone AlphaZero implementation with PettingZoo compatibility. Trains neural networks to play two-player zero-sum board games via MCTS-guided self-play. Built on Ray and PyTorch.
@@ -88,6 +90,10 @@ AlphaZooConfig
 ```
 
 Loss functions (`utils/functions/loss_functions.py`): KL divergence, cross-entropy, MSE, squared/absolute error for policy and value heads.
+
+### Dynamic batch_size cap (`AlphaZoo._capped_batch_size`)
+
+`_train_network` clamps the configured `batch_size` to `max(1, int(ratio * replay_size))` before handing it to the trainer. Ratios are class constants on `AlphaZoo`: `MAX_SAMPLES_BATCH_SIZE_RATIO = 0.05` and `MAX_EPOCHS_BATCH_SIZE_RATIO = 0.20`. In `samples` mode a warning is logged when `effective_batch_size * num_samples > replay_size`. The configured `LearningConfig` value is not mutated.
 
 ### Value Perspective (`player_dependent_value`)
 

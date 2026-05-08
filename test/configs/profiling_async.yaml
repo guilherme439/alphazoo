@@ -4,10 +4,6 @@ running:
   running_mode: "asynchronous"
   training_steps: 100
   num_gamers: 5
-  early_fill_games: 0
-  early_softmax_moves: 0
-  early_softmax_exploration: 0.5
-  early_random_exploration: 0.5
   asynchronous:
     update_delay: 9
 cache:
@@ -16,14 +12,15 @@ cache:
 data:
   player_dependent_value: true
 learning:
-  replay_window_size: 6000
+  replay_buffer:
+    window_size: 6000
+    leak_chance: 0.0
   learning_method: "samples"
   value_loss: "SE"
-  policy_loss: "CEL"
+  policy_loss: "CE"
   samples:
     batch_size: 32
     num_samples: 32
-    with_replacement: true
     late_heavy: true
 optimizer:
   optimizer_choice: "Adam"

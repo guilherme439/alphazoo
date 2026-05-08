@@ -21,7 +21,7 @@ from ..inference.inference_server import InferenceServer
 from ..internal_utils.common import (
     create_optimizer, create_scheduler, get_policy_loss_fn, get_value_loss_fn,
     sync_optimizer_lr)
-from ..internal_utils.progress import Bar, Spinner
+from ..internal_utils.progress import Spinner
 from ..metrics import MetricsRecorder, MetricsStore
 from ..networks.interfaces import AlphaZooNet, AlphaZooRecurrentNet
 from ..networks.network_manager import NetworkManager
@@ -37,6 +37,9 @@ StepCallback = Callable[["AlphaZoo", int, dict[str, Any]], None]
 
 
 class AlphaZoo:
+
+    MAX_SAMPLES_BATCH_SIZE_RATIO = 0.05
+    MAX_EPOCHS_BATCH_SIZE_RATIO = 0.20
 
     def __init__(
         self,
@@ -113,7 +116,11 @@ class AlphaZoo:
         elif learning_method == "samples":
             batch_size = learning_config.samples.batch_size
 
-        self.replay_buffer = ReplayBuffer(learning_config.replay_window_size, batch_size)
+        self.replay_buffer = ReplayBuffer(
+            learning_config.replay_buffer.window_size,
+            learning_config.replay_buffer.leak_chance,
+            batch_size,
+        )
         if replay_buffer_state is not None:
             self.replay_buffer.load_state(replay_buffer_state)
 
@@ -153,7 +160,6 @@ class AlphaZoo:
 
         running_mode = config.running.running_mode
         num_gamers = config.running.num_gamers
-        early_fill_games = config.running.early_fill_games
         training_steps = int(config.running.training_steps)
 
         update_delay: float = 0
@@ -216,7 +222,7 @@ class AlphaZoo:
         # ------------------- LOSS FUNCTIONS ------------------- #
 
         policy_loss_function, normalize_policy = get_policy_loss_fn(
-            config.learning.policy_loss, config.learning.normalize_cel,
+            config.learning.policy_loss, config.learning.normalize_ce,
         )
         value_loss_function = get_value_loss_fn(config.learning.value_loss)
 
@@ -236,8 +242,6 @@ class AlphaZoo:
             logger.info("\n\nRunning until training step number " + str(training_steps) +
                        " with " + wait_desc + " between each step:")
 
-        if early_fill_games > 0:
-            logger.info("-Playing " + str(early_fill_games) + " initial games to fill the replay buffer.")
         if cache_enabled:
             logger.info("-Using cache for inference results.")
         if torch.cuda.is_available():
@@ -265,24 +269,6 @@ class AlphaZoo:
             num_gamers, search_config, pred_iterations,
         )
 
-        # ---- EARLY FILL ---- #
-
-        if early_fill_games > 0:
-            early_search_config = deepcopy(self.config.search)
-            early_search_config.exploration.number_of_softmax_moves = self.config.running.early_softmax_moves
-            early_search_config.exploration.epsilon_softmax_exploration = self.config.running.early_softmax_exploration
-            early_search_config.exploration.epsilon_random_exploration = self.config.running.early_random_exploration
-
-            ray.get([
-                gamer.set_search_config.remote(early_search_config)
-                for gamer in self._gamers
-            ])
-            self._run_selfplay(early_fill_games, "Early buffer fill")
-            ray.get([
-                gamer.set_search_config.remote(search_config)
-                for gamer in self._gamers
-            ])
-
         # ---- START ASYNC GAMERS ---- #
 
         async_futures: list[Any] = []
@@ -298,7 +284,7 @@ class AlphaZoo:
             step_start = time.time()
 
             if running_mode == "sequential":
-                self._run_selfplay(num_games_per_step, "Self-play")
+                self._run_selfplay(num_games_per_step)
             elif running_mode == "asynchronous":
                 self._wait_for_selfplay(update_delay, async_min_num_games)
 
@@ -353,17 +339,6 @@ class AlphaZoo:
         logger.info("Total run time: " + format(total_run_time / 60, '.4') + "m")
         logger.info("All done.\nExiting")
 
-    def _run_selfplay(self, num_games: int, progress_bar_title: str) -> None:
-        num_games_per_task = 1
-
-        pool = ActorPool(self._gamers)
-        for _ in range(num_games):
-            pool.submit(lambda gamer, _: gamer.play_games.remote(num_games_per_task), None)
-
-        with Bar(progress_bar_title, total=num_games) as bar:
-            while pool.has_next():
-                pool.get_next_unordered()
-                bar.tick()
 
     def _train_network(
         self,
@@ -384,23 +359,60 @@ class AlphaZoo:
         replay_size: int = self.replay_buffer.len()
 
         if learning_method == "epochs":
+            effective_batch_size = self._capped_batch_size(
+                batch_size, replay_size, self.MAX_EPOCHS_BATCH_SIZE_RATIO,
+            )
             self.trainer.train_with_epochs(
-                self.replay_buffer, batch_size, replay_size,
+                self.replay_buffer, effective_batch_size, replay_size,
                 policy_loss_function, value_loss_function,
                 normalize_policy, train_iterations, prog_alpha,
                 use_progressive_loss,
                 learning_config.epochs.learning_epochs)
         elif learning_method == "samples":
+            effective_batch_size = self._capped_batch_size(
+                batch_size, replay_size, self.MAX_SAMPLES_BATCH_SIZE_RATIO,
+            )
+            num_samples = learning_config.samples.num_samples
+            total_draws = effective_batch_size * num_samples
+            if total_draws > replay_size:
+                logger.warning(
+                    "WARNING: Oversampling -> batch_size (%d) * num_samples (%d) = %d exceeds replay buffer size (%d); ",
+                    effective_batch_size, num_samples, total_draws, replay_size,
+                )
             self.trainer.train_with_samples(
-                self.replay_buffer, batch_size, replay_size,
+                self.replay_buffer, effective_batch_size, replay_size,
                 policy_loss_function, value_loss_function,
                 normalize_policy, train_iterations, prog_alpha,
-                use_progressive_loss,
-                learning_config.samples.num_samples,
-                learning_config.samples.late_heavy,
-                learning_config.samples.with_replacement)
+                use_progressive_loss, num_samples,
+                learning_config.samples.late_heavy)
         else:
             raise Exception("Bad learning_method config.")
+
+    def _run_selfplay(self, num_games: int) -> None:
+        num_games_per_task = 1
+
+        pool = ActorPool(self._gamers)
+        for _ in range(num_games):
+            pool.submit(lambda gamer, _: gamer.play_games.remote(num_games_per_task), None)
+
+        with Spinner(f"Self-play ({num_games} games)"):
+            while pool.has_next():
+                pool.get_next_unordered()
+
+    def _wait_for_selfplay(self, update_delay: float, min_num_games: Optional[int]) -> None:
+        deadline = time.time() + update_delay
+        poll_interval = 0.2
+
+        if min_num_games is None:
+            description = f"Waiting for selfplay (max {update_delay:.1f}s)"
+        else:
+            description = f"Waiting for selfplay (max {update_delay:.1f}s, min {min_num_games} games)"
+
+        with Spinner(description, max_duration=update_delay):
+            while time.time() < deadline:
+                if min_num_games is not None and self.record_queue.qsize() >= min_num_games:
+                    return
+                time.sleep(poll_interval)
 
     def _create_gamers(
         self,
@@ -435,20 +447,9 @@ class AlphaZoo:
             record = self.record_queue.get(block=False)
             self.replay_buffer.save_game_record(record)
 
-    def _wait_for_selfplay(self, update_delay: float, min_num_games: Optional[int]) -> None:
-        deadline = time.time() + update_delay
-        poll_interval = 0.2
-
-        if min_num_games is None:
-            description = f"Waiting for selfplay (max {update_delay:.1f}s)"
-        else:
-            description = f"Waiting for selfplay (max {update_delay:.1f}s, min {min_num_games} games)"
-
-        with Spinner(description, max_duration=update_delay):
-            while time.time() < deadline:
-                if min_num_games is not None and self.record_queue.qsize() >= min_num_games:
-                    return
-                time.sleep(poll_interval)
+    def _capped_batch_size(self, batch_size: int, replay_size: int, ratio: float) -> int:
+        """Cap `batch_size` at `ratio` of `replay_size` (minimum 1)."""
+        return max(1, min(batch_size, int(ratio * replay_size)))
 
     def _get_metrics(self) -> dict:
         return self.recorder.drain()

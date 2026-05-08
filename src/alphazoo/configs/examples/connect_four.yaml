@@ -9,10 +9,6 @@ running:
   running_mode: "sequential"
   num_gamers: 8
   training_steps: 500
-  early_fill_games: 100
-  early_softmax_moves: 12
-  early_softmax_exploration: 0.5
-  early_random_exploration: 0.5
   sequential:
     num_games_per_step: 12
   asynchronous:
@@ -30,15 +26,16 @@ recurrent:
   prog_alpha: 0.5
 
 learning:
-  replay_window_size: 10000
+  replay_buffer:
+    window_size: 10000
+    leak_chance: 0.0
   learning_method: "samples"
   value_loss: "SE"
-  policy_loss: "CEL"
-  normalize_cel: false
+  policy_loss: "CE"
+  normalize_ce: false
   samples:
     batch_size: 64
     num_samples: 128
-    with_replacement: true
     late_heavy: true
   epochs:
     batch_size: 2048

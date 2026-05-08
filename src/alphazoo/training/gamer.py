@@ -72,15 +72,6 @@ class Gamer:
         if self.profiler:
             self.profiler.accumulate(self.profiler.stop())
 
-    def set_search_config(self, search_config: SearchConfig) -> None:
-        self.search_config = search_config
-        self.explorer = Explorer(
-            search_config,
-            training=True,
-            player_dependent_value=self.player_dependent_value,
-            threaded=search_config.simulation.parallel_search,
-        )
-
     def stop(self) -> None:
         self._stopped = True
 

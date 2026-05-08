@@ -44,10 +44,6 @@ AlphaZooConfig
 │   ├── running_mode
 │   ├── num_gamers
 │   ├── training_steps
-│   ├── early_fill_games
-│   ├── early_softmax_moves
-│   ├── early_softmax_exploration
-│   ├── early_random_exploration
 │   ├── sequential: SequentialConfig
 │   │   └── num_games_per_step
 │   └── asynchronous: AsynchronousConfig
@@ -63,15 +59,16 @@ AlphaZooConfig
 │   ├── use_progressive_loss
 │   └── prog_alpha
 ├── learning: LearningConfig
-│   ├── replay_window_size
+│   ├── replay_buffer: ReplayBufferConfig
+│   │   ├── window_size
+│   │   └── leak_chance
 │   ├── value_loss
 │   ├── policy_loss
-│   ├── normalize_cel
+│   ├── normalize_ce
 │   ├── learning_method
 │   ├── samples: SamplesConfig
 │   │   ├── batch_size
 │   │   ├── num_samples
-│   │   ├── with_replacement
 │   │   └── late_heavy
 │   └── epochs: EpochsConfig
 │       ├── batch_size
@@ -152,10 +149,6 @@ Controls self-play execution, parallelism, and early-game exploration.
 | `running_mode` | `"sequential"` \| `"asynchronous"` | `"sequential"` | Self-play execution mode. See [Running Modes](#running-modes). |
 | `num_gamers` | `int` | `4` | Number of Ray Gamer actors for self-play. |
 | `training_steps` | `int` | `1000` | Total training steps. |
-| `early_fill_games` | `int` | `0` | Games to play before training starts, to fill the replay buffer. |
-| `early_softmax_moves` | `int` | `12` | Number of softmax moves during early-fill games. |
-| `early_softmax_exploration` | `float` | `0.5` | Softmax exploration temperature during early-fill games. |
-| `early_random_exploration` | `float` | `0.5` | Random exploration probability during early-fill games. |
 
 ### Running Modes
 
@@ -221,13 +214,21 @@ This encourages the network to produce reasonable outputs at any iteration count
 
 Controls the training loop: replay buffer, loss functions, and data sampling.
 
+The configured `batch_size` is automatically reduced when it would otherwise be too large relative to the current replay buffer, keeping training stable while the buffer is still filling.
+
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `replay_window_size` | `int` | `10000` | Maximum number of positions kept in the replay buffer. Older positions are discarded as new ones arrive. |
 | `value_loss` | `"SE"` \| `"AE"` | `"SE"` | Value head loss function. `SE` = squared error, `AE` = absolute error. |
-| `policy_loss` | `"CEL"` \| `"KLD"` \| `"MSE"` | `"CEL"` | Policy head loss function. `CEL` = cross-entropy, `KLD` = KL divergence, `MSE` = mean squared error. |
-| `normalize_cel` | `bool` | `false` | Normalize cross-entropy loss by the entropy of the target distribution. |
+| `policy_loss` | `"CE"` \| `"KLD"` \| `"MSE"` | `"CE"` | Policy head loss function. `CE` = cross-entropy, `KLD` = KL divergence, `MSE` = mean squared error. |
+| `normalize_ce` | `bool` | `false` | Normalize cross-entropy loss by the entropy of the target distribution. |
 | `learning_method` | `"samples"` \| `"epochs"` | `"samples"` | How training data is drawn from the replay buffer each step. |
+
+### Replay Buffer
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `window_size` | `int` | `10000` | Maximum number of games kept in the replay buffer. Once reached, every new position pushes out the oldest. |
+| `leak_chance` | `float` | `0.0` | While the buffer is not yet full, the probability that adding a new position also drops the oldest one. `0.0` disables leaking; `1.0` keeps the buffer at its current size by leaking on every add. Has no effect once the buffer is full. |
 
 ### Samples
 
@@ -237,7 +238,6 @@ Used when `learning_method` is `"samples"`. Draws a fixed number of mini-batches
 |-------|------|---------|-------------|
 | `batch_size` | `int` | `256` | Number of positions per mini-batch. |
 | `num_samples` | `int` | `32` | Number of mini-batches drawn per training step. |
-| `with_replacement` | `bool` | `true` | Sample positions with replacement. |
 | `late_heavy` | `bool` | `true` | Bias sampling toward more recent positions in the replay buffer. |
 
 ### Epochs

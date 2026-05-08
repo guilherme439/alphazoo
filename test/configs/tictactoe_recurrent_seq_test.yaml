@@ -3,11 +3,7 @@ verbose: true
 running:
   running_mode: "sequential"
   num_gamers: 1
-  early_fill_games: 3
   training_steps: 8
-  early_softmax_moves: 1
-  early_softmax_exploration: 1.0
-  early_random_exploration: 0.0
   sequential:
     num_games_per_step: 2
 
@@ -25,11 +21,13 @@ recurrent:
   prog_alpha: 0.5
 
 learning:
-  replay_window_size: 500
+  replay_buffer:
+    window_size: 500
+    leak_chance: 0.0
   learning_method: "epochs"
   value_loss: "SE"
   policy_loss: "KLD"
-  normalize_cel: false
+  normalize_ce: false
   epochs:
     batch_size: 16
     learning_epochs: 1
