@@ -395,7 +395,7 @@ class AlphaZoo:
         for _ in range(num_games):
             pool.submit(lambda gamer, _: gamer.play_games.remote(num_games_per_task), None)
 
-        with Spinner(f"Self-play ({num_games} games)"):
+        with Spinner(f"Self-play "):
             while pool.has_next():
                 pool.get_next_unordered()
 
@@ -404,9 +404,9 @@ class AlphaZoo:
         poll_interval = 0.2
 
         if min_num_games is None:
-            description = f"Waiting for selfplay (max {update_delay:.1f}s)"
+            description = f"Waiting for selfplay "
         else:
-            description = f"Waiting for selfplay (max {update_delay:.1f}s, min {min_num_games} games)"
+            description = f"Waiting for selfplay "
 
         with Spinner(description, max_duration=update_delay):
             while time.time() < deadline:
