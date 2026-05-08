@@ -280,7 +280,7 @@ class AlphaZoo:
         steps_to_run = range(self.starting_step + 1, training_steps + 1)
         for step in steps_to_run:
             self.current_step = step
-            logger.info("\n\nStep " + str(step) + "/" + str(training_steps))
+            logger.info("\nStep " + str(step) + "/" + str(training_steps) + "\n")
             step_start = time.time()
 
             if running_mode == "sequential":
