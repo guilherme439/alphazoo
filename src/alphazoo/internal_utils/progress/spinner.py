@@ -5,9 +5,25 @@ import os
 import sys
 import threading
 import time
-from typing import Optional
+from typing import Any, Optional, TextIO
 
 logger = logging.getLogger("alphazoo")
+
+
+class _StdoutGuard:
+    """Wraps a TextIO stream; reports writes that didn't originate from the spinner."""
+
+    def __init__(self, spinner: "Spinner", wrapped: TextIO) -> None:
+        self._spinner = spinner
+        self._wrapped = wrapped
+
+    def write(self, s: str) -> int:
+        if self._spinner._is_internal_write():
+            return self._wrapped.write(s)
+        return self._spinner._handle_external_write(self._wrapped, s)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._wrapped, name)
 
 
 class Spinner:
@@ -32,6 +48,7 @@ class Spinner:
     _BASE_FRAME_INTERVAL = 0.1
     _MAX_FRAME_INTERVAL = 0.35
     _ANSI_RESET = "\033[0m"
+    _QUIET_PERIOD = 2.0
 
     def __init__(
         self,
@@ -50,12 +67,20 @@ class Spinner:
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._frame_idx = 0
+        self._lock = threading.Lock()
+        self._tls = threading.local()
+        self._line_dirty = False
+        self._external_last_time: Optional[float] = None
+        self._external_last_char = ""
+        self._original_stdout: Optional[TextIO] = None
+        self._original_stderr: Optional[TextIO] = None
 
     def __enter__(self) -> "Spinner":
         if not self._enabled:
             return self
         self._start_time = time.time()
         if self._is_tty:
+            self._install_guards()
             self._tty_render()
         else:
             logger.info(f"{self.description}: starting")
@@ -70,6 +95,12 @@ class Spinner:
         if not self._enabled:
             return
         if self._is_tty:
+            with self._lock:
+                interrupted = self._external_last_time is not None
+                ext_last_char = self._external_last_char
+            self._restore_guards()
+            if interrupted and ext_last_char != "\n":
+                sys.stdout.write("\n")
             color = self._color_code()
             reset = self._ANSI_RESET if color else ""
             line = f"{color}{self._DONE_FRAME} {self.description}{reset}"
@@ -83,8 +114,9 @@ class Spinner:
         last_heartbeat = self._start_time or time.time()
         while not self._stop_event.is_set():
             if self._is_tty:
-                self._frame_idx = (self._frame_idx + 1) % len(self._FRAMES)
-                self._tty_render()
+                if self._should_resume_after_interruption():
+                    self._frame_idx = (self._frame_idx + 1) % len(self._FRAMES)
+                    self._tty_render()
                 self._stop_event.wait(self._current_interval())
             else:
                 now = time.time()
@@ -99,8 +131,63 @@ class Spinner:
         color = self._color_code()
         reset = self._ANSI_RESET if color else ""
         line = f"{color}{frame} {self.description}{reset}"
-        sys.stdout.write("\r" + line + "   ")
-        sys.stdout.flush()
+        with self._lock:
+            self._do_internal_write("\r" + line + "   ")
+            sys.stdout.flush()
+            self._line_dirty = True
+
+    def _should_resume_after_interruption(self) -> bool:
+        with self._lock:
+            ext_time = self._external_last_time
+            ext_char = self._external_last_char
+        if ext_time is None:
+            return True
+        if time.time() - ext_time < self._QUIET_PERIOD:
+            return False
+        if ext_char != "\n":
+            self._do_internal_write("\n")
+        with self._lock:
+            self._external_last_time = None
+            self._external_last_char = ""
+        return True
+
+    def _install_guards(self) -> None:
+        self._original_stdout = sys.stdout
+        self._original_stderr = sys.stderr
+        sys.stdout = _StdoutGuard(self, sys.stdout)
+        sys.stderr = _StdoutGuard(self, sys.stderr)
+
+    def _restore_guards(self) -> None:
+        if self._original_stdout is not None:
+            sys.stdout = self._original_stdout
+            self._original_stdout = None
+        if self._original_stderr is not None:
+            sys.stderr = self._original_stderr
+            self._original_stderr = None
+
+    def _do_internal_write(self, s: str) -> None:
+        self._tls.internal = True
+        try:
+            sys.stdout.write(s)
+        finally:
+            self._tls.internal = False
+
+    def _is_internal_write(self) -> bool:
+        return getattr(self._tls, "internal", False)
+
+    def _handle_external_write(self, wrapped: TextIO, s: str) -> int:
+        with self._lock:
+            if self._line_dirty:
+                wrapped.write("\r" + " " * self._clear_width() + "\r")
+                self._line_dirty = False
+            written = wrapped.write(s)
+            if s:
+                self._external_last_time = time.time()
+                self._external_last_char = s[-1]
+            return written
+
+    def _clear_width(self) -> int:
+        return len(self.description) + 8
 
     def _patience_t(self) -> float:
         if self._max_duration is None or self._max_duration <= 0 or self._start_time is None:
