@@ -138,6 +138,8 @@ class AlphaZoo:
             "train/replay_buffer_size",
             "train/learning_rate",
             "inference/cache_hit_ratio",
+            "inference/cycle_size",
+            "inference/batch_size",
         })
     
     def get_optimizer_state_dict(self) -> dict:
