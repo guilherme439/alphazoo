@@ -128,7 +128,7 @@ Public metrics (available in callback):
 | `train/combined_loss` | Combined loss |
 | `train/replay_buffer_size` | Replay buffer size |
 | `train/learning_rate` | Current learning rate |
-| `cache/hit_ratio` | Inference cache hit ratio |
+| `inference/cache_hit_ratio` | Inference cache hit ratio |
 
 Use this callback for checkpointing, logging, or early stopping.
 

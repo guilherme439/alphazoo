@@ -39,7 +39,20 @@ class InferenceSlot:
         self._shm_policy: Optional[SharedMemory] = None
         self._shm_value: Optional[SharedMemory] = None
 
-    def connect(self, *, create: bool = False) -> None:
+    def initialize(self) -> None:
+        self._open(create=True)
+
+    def connect(self) -> None:
+        self._open(create=False)
+
+    def new_view(self) -> "InferenceSlot":
+        return InferenceSlot(
+            self._state_size, self._action_size,
+            self._state_nbytes, self._policy_nbytes, self._value_nbytes,
+            self._input_name, self._policy_name, self._value_name,
+        )
+
+    def _open(self, *, create: bool) -> None:
         self._shm_input = SharedMemory(name=self._input_name, create=create, size=self._state_nbytes)
         self._shm_policy = SharedMemory(name=self._policy_name, create=create, size=self._policy_nbytes)
         self._shm_value = SharedMemory(name=self._value_name, create=create, size=self._value_nbytes)

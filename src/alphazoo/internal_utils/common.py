@@ -23,10 +23,6 @@ def initialize_parameters(model: torch.nn.Module) -> None:
             torch.nn.init.xavier_uniform_(param)
 
 
-def create_cache(max_size: int) -> KeylessCache:
-    return KeylessCache(max_size)
-
-
 def get_policy_loss_fn(choice: str, normalize_ce: bool) -> tuple[LossFunction, bool]:
     match choice:
         case "CE":

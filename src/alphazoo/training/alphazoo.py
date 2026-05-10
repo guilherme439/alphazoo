@@ -137,7 +137,7 @@ class AlphaZoo:
             "train/combined_loss",
             "train/replay_buffer_size",
             "train/learning_rate",
-            "cache/hit_ratio",
+            "inference/cache_hit_ratio",
         })
     
     def get_optimizer_state_dict(self) -> dict:
@@ -202,9 +202,10 @@ class AlphaZoo:
         search_threads = simulation_config.parallel.num_search_threads if simulation_config.parallel_search else 1
         total_clients = num_gamers * search_threads
 
-        cpu_network_manager = NetworkManager(deepcopy(self.model), device="cpu")
-        self.inference_server = InferenceServer.remote(
-            cpu_network_manager,
+        inference_network_manager = NetworkManager(deepcopy(self.model))
+        inference_num_gpus = 1 if torch.cuda.is_available() else 0 # inference server does not gpu/data paralellism yet
+        self.inference_server = InferenceServer.options(num_gpus=inference_num_gpus).remote(
+            inference_network_manager,
             cache_enabled,
             cache_max,
             total_clients,
@@ -503,7 +504,7 @@ class AlphaZoo:
         games = public.get("rollout/games", 0)
         avg_moves = public.get("rollout/episode_len_mean", 0.0)
         tree_size = internal.get("rollout/tree_size", 0)
-        cache_hit = public.get("cache/hit_ratio", 0.0)
+        cache_hit = public.get("inference/cache_hit_ratio", 0.0)
         replay_size = public.get("train/replay_buffer_size", 0)
         replay_games = internal.get("train/replay_buffer_games", 0)
         lr = public.get("train/learning_rate", 0.0)
