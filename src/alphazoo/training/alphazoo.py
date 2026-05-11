@@ -102,6 +102,8 @@ class AlphaZoo:
 
         if optimizer_state_dict is not None:
             self.optimizer.load_state_dict(optimizer_state_dict)
+
+        if scheduler_state_dict is not None or optimizer_state_dict is not None:
             sync_optimizer_lr(self.optimizer, self.scheduler)
 
         self.trainer = NetworkTrainer(self.training_network_manager, self.optimizer, self.scheduler)
