@@ -253,9 +253,9 @@ class Explorer:
         recurrent_iterations: int
     ) -> tuple[Any, Any]:
         if inference_client.is_recurrent():
-            (policy, value), _ = inference_client.recurrent_inference(state, False, recurrent_iterations)
+            (policy, value), _ = inference_client.recurrent_inference(state, recurrent_iterations)
         else:
-            policy, value = inference_client.inference(state, False)
+            policy, value = inference_client.inference(state)
         return softmax(policy), value
 
     def _backpropagate(self, search_path: list[Node], value: float) -> None:

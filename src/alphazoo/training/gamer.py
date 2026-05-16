@@ -6,7 +6,7 @@ import ray
 
 from ..configs.search_config import SearchConfig
 from ..ialphazoo_game import IAlphazooGame
-from ..inference.inference_client import InferenceClient
+from ..inference.ipc import IpcInferenceClient
 from ..metrics import MetricsRecorder
 from ..search.explorer import Explorer
 from ..search.node import Node
@@ -26,7 +26,7 @@ class Gamer:
         search_config: SearchConfig,
         recurrent_iterations: int,
         player_dependent_value: bool,
-        inference_clients: list[InferenceClient],
+        inference_clients: list[IpcInferenceClient],
         profiler: Profiler | None = None,
     ) -> None:
         self.record_queue = record_queue

@@ -1,2 +1,2 @@
 from .interfaces import AlphaZooNet, AlphaZooRecurrentNet
-from .network_manager import NetworkManager
+from .model_host import ModelHost

@@ -19,9 +19,9 @@ from .training.game_record import GameRecord
 from .search.explorer import Explorer
 from .search.node import Node
 
-from .networks import AlphaZooNet, AlphaZooRecurrentNet, NetworkManager
+from .networks import AlphaZooNet, AlphaZooRecurrentNet, ModelHost
 
-from .inference import InferenceServer, InferenceClient
+from .inference import IpcInferenceServer, IpcInferenceClient, LpcInferenceServer, LpcInferenceClient
 
 from .configs.alphazoo_config import AlphaZooConfig
 from .configs.search_config import SearchConfig
@@ -39,9 +39,11 @@ __all__ = [
     "Node",
     "AlphaZooNet",
     "AlphaZooRecurrentNet",
-    "NetworkManager",
-    "InferenceServer",
-    "InferenceClient",
+    "ModelHost",
+    "IpcInferenceServer",
+    "IpcInferenceClient",
+    "LpcInferenceServer",
+    "LpcInferenceClient",
     "AlphaZooConfig",
     "SearchConfig",
     "MetricsRecorder",

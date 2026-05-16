@@ -17,14 +17,14 @@ from ray.util.queue import Queue
 
 from ..configs.alphazoo_config import AlphaZooConfig
 from ..ialphazoo_game import IAlphazooGame
-from ..inference.inference_server import InferenceServer
+from ..inference.ipc import IpcInferenceServer
 from ..internal_utils.common import (
     create_optimizer, create_scheduler, get_policy_loss_fn, get_value_loss_fn,
     sync_optimizer_lr)
 from ..internal_utils.progress import Spinner
 from ..metrics import MetricsRecorder, MetricsStore
 from ..networks.interfaces import AlphaZooNet, AlphaZooRecurrentNet
-from ..networks.network_manager import NetworkManager
+from ..networks.model_host import ModelHost
 from ..profiling import Profiler
 from ..wrappers.pettingzoo_wrapper import PettingZooWrapper
 from .gamer import Gamer
@@ -50,8 +50,10 @@ class AlphaZoo:
         scheduler_state_dict: Optional[dict] = None,
         replay_buffer_state: Optional[dict] = None,
     ) -> None:
-        """When `optimizer_state_dict` or `scheduler_state_dict` is provided, the
-        corresponding section of `config` (`optimizer` / `scheduler`) is ignored."""
+        """
+        When `optimizer_state_dict` or `scheduler_state_dict` is provided, the
+        corresponding section of `config` (`optimizer` / `scheduler`) is ignored.
+        """
         self.config = config
         self.profiling = "ALPHAZOO_PROFILE" in os.environ
 
@@ -65,36 +67,38 @@ class AlphaZoo:
 
         # -------------------- NETWORK SETUP ------------------- #
 
-        starting_lr = config.scheduler.starting_lr
-        scheduler_boundaries = config.scheduler.boundaries
-        scheduler_gamma = config.scheduler.gamma
-
-        optimizer_name = config.optimizer.optimizer_choice
-        weight_decay = config.optimizer.sgd.weight_decay
-        momentum = config.optimizer.sgd.momentum
-        nesterov = config.optimizer.sgd.nesterov
-
-        if isinstance(model, AlphaZooRecurrentNet) and config.recurrent is None:
+        model_is_recurrent: bool = isinstance(model, AlphaZooRecurrentNet)
+        if model_is_recurrent and config.recurrent is None:
             raise ValueError(
                 "A RecurrentConfig must be provided when using an AlphaZooRecurrentNet. "
                 "Add recurrent=RecurrentConfig(...) to your AlphaZooConfig."
             )
 
         self.model = model
-        self.training_network_manager = NetworkManager(model)
+
+        # dummy forward pass to initialize possible lazy layers before passing the model to the hosts
+        obs = self.game.observe()
+        dummy_state = self.game.obs_to_state(obs, None)
+        if model_is_recurrent:
+            self.model.forward(dummy_state, iters_to_do=1)
+        else:
+            self.model.forward(dummy_state)
+
+        self.training_host = ModelHost(model, training=True)
+        self.inference_host = ModelHost(deepcopy(self.model), training=False)
 
         self.optimizer = create_optimizer(
-            self.training_network_manager.get_model(),
-            optimizer_name,
-            starting_lr,
-            weight_decay,
-            momentum,
-            nesterov
+            self.training_host.model,
+            config.optimizer.optimizer_choice,
+            config.scheduler.starting_lr,
+            config.optimizer.sgd.weight_decay,
+            config.optimizer.sgd.momentum,
+            config.optimizer.sgd.nesterov
         )
         self.scheduler = create_scheduler(
             self.optimizer, 
-            scheduler_boundaries, 
-            scheduler_gamma
+            config.scheduler.boundaries, 
+            config.scheduler.gamma
         )
 
         if scheduler_state_dict is not None:
@@ -106,7 +110,7 @@ class AlphaZoo:
         if scheduler_state_dict is not None or optimizer_state_dict is not None:
             sync_optimizer_lr(self.optimizer, self.scheduler)
 
-        self.trainer = NetworkTrainer(self.training_network_manager, self.optimizer, self.scheduler)
+        self.trainer = NetworkTrainer(self.training_host, self.optimizer, self.scheduler)
 
         # -------------------- REPLAY BUFFER ------------------- #
 
@@ -187,36 +191,25 @@ class AlphaZoo:
             prog_alpha = 0.0
             use_progressive_loss = False
 
-        # dummy forward pass to initialize possible lazy layers
-        obs = self.game.observe()
-        dummy_state = self.game.obs_to_state(obs, None)
-        if self.training_network_manager.is_recurrent():
-            self.training_network_manager.recurrent_inference(dummy_state, False, iters_to_do=1)
-        else:
-            self.training_network_manager.inference(dummy_state, False)
-
         # ------------- INFERENCE SERVER SETUP -------------- #
 
         state_shape = self.game.get_state_shape()
         state_size = self.game.get_state_size()
         action_size = self.game.get_action_size()
-        is_recurrent = self.training_network_manager.is_recurrent()
 
         simulation_config = config.search.simulation
         search_threads = simulation_config.parallel.num_search_threads if simulation_config.parallel_search else 1
         total_clients = num_gamers * search_threads
 
-        inference_network_manager = NetworkManager(deepcopy(self.model))
-        inference_num_gpus = 1 if torch.cuda.is_available() else 0 # inference server does not gpu/data paralellism yet
-        self.inference_server = InferenceServer.options(num_gpus=inference_num_gpus).remote(
-            inference_network_manager,
+        inference_num_gpus = 1 if torch.cuda.is_available() else 0 # server doesn't have gpu/data paralellism yet
+        self.inference_server = IpcInferenceServer.options(num_gpus=inference_num_gpus).remote(
+            self.inference_host,
             cache_enabled,
             cache_max,
             total_clients,
             state_size,
             state_shape,
             action_size,
-            is_recurrent,
             pred_iterations,
         )
         self._inference_clients = ray.get(self.inference_server.get_clients.remote())
@@ -315,7 +308,6 @@ class AlphaZoo:
                 step_end - step_start,
                 step_end - run_start,
             )
-            self.training_network_manager.increment_version()
             self._publish_model()
 
             if on_step_end is not None:
@@ -412,12 +404,7 @@ class AlphaZoo:
         deadline = time.time() + update_delay
         poll_interval = 0.2
 
-        if min_num_games is None:
-            description = f"Waiting for selfplay "
-        else:
-            description = f"Waiting for selfplay "
-
-        with Spinner(description, max_duration=update_delay):
+        with Spinner("Waiting for selfplay ", max_duration=update_delay):
             while time.time() < deadline:
                 if min_num_games is not None and self.record_queue.qsize() >= min_num_games:
                     return
@@ -429,27 +416,31 @@ class AlphaZoo:
         search_config: Any,
         pred_iterations: int,
     ) -> list[Any]:
-        t = search_config.simulation.parallel.num_search_threads if search_config.simulation.parallel_search else 1
+        threads_per_gamer: int = 1
+        if search_config.simulation.parallel_search:
+            threads_per_gamer = search_config.simulation.parallel.num_search_threads
+
         clients = self._inference_clients
 
-        return [
-            Gamer.remote(
+        gamers: list[Any] = []
+        for gamer_idx in range(num_gamers):
+            first_client_idx = gamer_idx * threads_per_gamer
+            gamer_clients = clients[first_client_idx : first_client_idx + threads_per_gamer]
+            gamer = Gamer.remote(
                 self.record_queue,
                 deepcopy(self.game),
                 search_config,
                 pred_iterations,
                 self.config.data.player_dependent_value,
-                clients[j * t:(j + 1) * t],
+                gamer_clients,
                 Profiler(self._profiling_dir) if self.profiling else None,
             )
-            for j in range(num_gamers)
-        ]
+            gamers.append(gamer)
+        return gamers
     
     def _publish_model(self) -> None:
-        cpu_state_dict = self.training_network_manager.get_state_dict("cpu")
-        ray.get(self.inference_server.publish_model.remote(
-            cpu_state_dict, self.training_network_manager.get_version()
-        ))
+        state_dict = self.trainer.get_state_dict()
+        ray.get(self.inference_server.publish_model.remote(state_dict))
 
     def _drain_record_queue(self) -> None:
         while not self.record_queue.empty():

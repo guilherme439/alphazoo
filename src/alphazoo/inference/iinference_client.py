@@ -13,13 +13,12 @@ class IInferenceClient(ABC):
     def is_recurrent(self) -> bool: ...
 
     @abstractmethod
-    def inference(self, state: Tensor, training: bool = False) -> tuple[Tensor, Tensor]: ...
+    def inference(self, state: Tensor) -> tuple[Tensor, Tensor]: ...
 
     @abstractmethod
     def recurrent_inference(
         self,
         state: Tensor,
-        training: bool,
         iters_to_do: int,
         interim_thought: Optional[Tensor] = None,
     ) -> tuple[tuple[Tensor, Tensor], Optional[Tensor]]: ...

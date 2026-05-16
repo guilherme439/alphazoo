@@ -9,7 +9,7 @@ import torch
 from torch import Tensor, nn
 
 from ..metrics import MetricsRecorder
-from ..networks.network_manager import NetworkManager
+from ..networks.model_host import ModelHost
 from .replay_buffer import ReplayBuffer
 
 logger = logging.getLogger("alphazoo")
@@ -19,14 +19,17 @@ LossFunction = Callable[[Tensor, Tensor], Tensor]
 
 class NetworkTrainer:
 
-    def __init__(self, network_manager: NetworkManager, optimizer: Any, scheduler: Any) -> None:
-        self.network_manager = network_manager
+    def __init__(self, model_host: ModelHost, optimizer: Any, scheduler: Any) -> None:
+        self.model_host = model_host
         self.optimizer = optimizer
         self.scheduler = scheduler
         self.recorder = MetricsRecorder()
 
     def get_metrics(self) -> dict:
         return self.recorder.drain()
+
+    def get_state_dict(self) -> dict:
+        return self.model_host.get_state_dict()
 
     def get_late_heavy_distribution(self, replay_size: int) -> list[float]:
         variation = 0.5
@@ -154,14 +157,13 @@ class NetworkTrainer:
         alpha: float,
         use_progressive_loss: bool,
     ) -> tuple[float, float, float]:
-        self.network_manager.get_model().train()
         self.optimizer.zero_grad()
 
         value_loss: Tensor | float = 0.0
         policy_loss: Tensor | float = 0.0
         combined_loss: Tensor | float = 0.0
 
-        if self.network_manager.is_recurrent():
+        if self.model_host.is_recurrent():
             value_loss, policy_loss, combined_loss = self._recurrent_batch_update(
                 batch, policy_loss_function, value_loss_function,
                 normalize_policy, train_iterations, alpha, use_progressive_loss)
@@ -187,7 +189,7 @@ class NetworkTrainer:
         states, targets = list(zip(*batch))
         batch_input = torch.cat(states, 0)
         batch_size = len(states)
-        outputs = self.network_manager.inference(batch_input, True)
+        outputs = self.model_host.forward(batch_input)
         return self._calculate_loss(
             outputs, targets, batch_size,
             policy_loss_function, value_loss_function, normalize_policy)
@@ -220,7 +222,7 @@ class NetworkTrainer:
             prog_combined_loss: Tensor | float = 0.0
 
             if alpha != 1:
-                outputs, _ = self.network_manager.recurrent_inference(batch_input, True, recurrent_iterations)
+                outputs, _ = self.model_host.recurrent_forward(batch_input, recurrent_iterations)
                 total_value_loss, total_policy_loss, total_combined_loss = self._calculate_loss(
                     outputs, targets, batch_size,
                     policy_loss_function, value_loss_function, normalize_policy)
@@ -235,7 +237,7 @@ class NetworkTrainer:
             policy_loss = (1 - alpha) * total_policy_loss + alpha * prog_policy_loss
             combined_loss = (1 - alpha) * total_combined_loss + alpha * prog_combined_loss
         else:
-            outputs, _ = self.network_manager.recurrent_inference(batch_input, True, recurrent_iterations)
+            outputs, _ = self.model_host.recurrent_forward(batch_input, recurrent_iterations)
             value_loss, policy_loss, combined_loss = self._calculate_loss(
                 outputs, targets, batch_size,
                 policy_loss_function, value_loss_function, normalize_policy)
@@ -253,11 +255,9 @@ class NetworkTrainer:
     ) -> tuple[Tensor, Tensor, Tensor]:
         target_values, target_policies = list(zip(*targets))
         predicted_policies, predicted_values = outputs
-        device = self.network_manager.device
+        device = self.model_host.device
 
-        target_policies_t = torch.stack(
-            [torch.tensor(p, dtype=torch.float32) for p in target_policies]
-        ).to(device)
+        target_policies_t = torch.stack([torch.tensor(p, dtype=torch.float32) for p in target_policies]).to(device)
         target_values_t = torch.tensor(list(target_values), dtype=torch.float32).to(device)
 
         predicted_policies_flat = predicted_policies.view(batch_size, -1)
@@ -290,10 +290,10 @@ class NetworkTrainer:
         k = randrange(1, max_iters - n + 1)
 
         if n > 0:
-            _, interim_thought = self.network_manager.recurrent_inference(inputs, True, iters_to_do=n)
+            _, interim_thought = self.model_host.recurrent_forward(inputs, iters_to_do=n)
             interim_thought = interim_thought.detach()
         else:
             interim_thought = None
 
-        outputs, _ = self.network_manager.recurrent_inference(inputs, True, iters_to_do=k, interim_thought=interim_thought)
+        outputs, _ = self.model_host.recurrent_forward(inputs, iters_to_do=k, interim_thought=interim_thought)
         return outputs
