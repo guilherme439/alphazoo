@@ -38,6 +38,7 @@ StepCallback = Callable[["AlphaZoo", int, dict[str, Any]], None]
 
 class AlphaZoo:
 
+    # these constants should eventually be moved to the network trainer
     MAX_SAMPLES_BATCH_SIZE_RATIO = 0.05
     MAX_EPOCHS_BATCH_SIZE_RATIO = 0.20
 
@@ -116,16 +117,15 @@ class AlphaZoo:
 
         learning_config = config.learning
         learning_method = learning_config.learning_method
-        batch_size: int = 0
+        self._batch_size: int = 0
         if learning_method == "epochs":
-            batch_size = learning_config.epochs.batch_size
+            self._batch_size = learning_config.epochs.batch_size
         elif learning_method == "samples":
-            batch_size = learning_config.samples.batch_size
+            self._batch_size = learning_config.samples.batch_size
 
         self.replay_buffer = ReplayBuffer(
             learning_config.replay_buffer.window_size,
             learning_config.replay_buffer.leak_chance,
-            batch_size,
         )
         if replay_buffer_state is not None:
             self.replay_buffer.load_state(replay_buffer_state)
@@ -142,10 +142,11 @@ class AlphaZoo:
             "train/policy_loss",
             "train/combined_loss",
             "train/replay_buffer_size",
+            "train/replay_buffer_duplicate_rate",
             "train/learning_rate",
             "inference/cache_hit_ratio",
             "inference/cycle_size",
-            "inference/batch_size",
+            "inference/bucket_size",
         })
     
     def get_optimizer_state_dict(self) -> dict:
@@ -159,9 +160,6 @@ class AlphaZoo:
 
     def train(self, on_step_end: Optional[StepCallback] = None) -> None:
         logger.setLevel(logging.INFO if self.config.verbose else logging.WARNING)
-
-        pid = os.getpid()
-        process = psutil.Process(pid)
 
         config = self.config
         self.current_step = self.starting_step
@@ -202,6 +200,7 @@ class AlphaZoo:
         total_clients = num_gamers * search_threads
 
         inference_num_gpus = 1 if torch.cuda.is_available() else 0 # server doesn't have gpu/data paralellism yet
+        # In the future the server class used should depend on the available resources 
         self.inference_server = IpcInferenceServer.options(num_gpus=inference_num_gpus).remote(
             self.inference_host,
             cache_enabled,
@@ -227,7 +226,7 @@ class AlphaZoo:
         # --------------------- TRAINING ---------------------- #
 
         learning_method = config.learning.learning_method
-        batch_size = self.replay_buffer.get_batch_size()
+        batch_size = self._batch_size
 
         if running_mode == "sequential":
             self.games_per_step = num_games_per_step
@@ -353,7 +352,7 @@ class AlphaZoo:
         recurrent_config = self.config.recurrent
         train_iterations = recurrent_config.train_iterations if recurrent_config is not None else 1
 
-        replay_size: int = self.replay_buffer.len()
+        replay_size: int = len(self.replay_buffer)
 
         if replay_size == 0:
             logger.warning("WARNING: Replay buffer is empty; skipping training step.")
@@ -445,7 +444,7 @@ class AlphaZoo:
     def _drain_record_queue(self) -> None:
         while not self.record_queue.empty():
             record = self.record_queue.get(block=False)
-            self.replay_buffer.save_game_record(record)
+            self.replay_buffer.save_game_record(record, self.current_step)
 
     def _capped_batch_size(self, batch_size: int, replay_size: int, ratio: float) -> int:
         """Cap `batch_size` at `ratio` of `replay_size` (minimum 1)."""
@@ -474,8 +473,8 @@ class AlphaZoo:
         remote_metrics = ray.get(futures)
 
         self.recorder.scalar("step", step)
-        self.recorder.scalar("train/replay_buffer_size", self.replay_buffer.len())
-        self.recorder.scalar("train/replay_buffer_games", self.replay_buffer.played_games())
+        self.recorder.scalar("train/replay_buffer_size", len(self.replay_buffer))
+        self.recorder.scalar("train/replay_buffer_duplicate_rate", self.replay_buffer.duplicate_rate())
         self.recorder.scalar("train/learning_rate", self.scheduler.get_last_lr()[0])
         self.recorder.scalar("time/step", step_time)
         self.recorder.scalar("time/selfplay", selfplay_time)
@@ -501,7 +500,6 @@ class AlphaZoo:
         tree_size = internal.get("rollout/tree_size", 0)
         cache_hit = public.get("inference/cache_hit_ratio", 0.0)
         replay_size = public.get("train/replay_buffer_size", 0)
-        replay_games = internal.get("train/replay_buffer_games", 0)
         lr = public.get("train/learning_rate", 0.0)
         loss = public.get("train/combined_loss", 0.0)
         selfplay_time = internal.get("time/selfplay", 0.0)
@@ -513,7 +511,7 @@ class AlphaZoo:
             f" | Tree size: {tree_size:.0f} | Cache hit: {cache_hit:.2f}"
         )
         logger.info(
-            f"Replay buffer: {replay_size} positions, {replay_games} games."
+            f"Replay buffer: {replay_size} positions."
             f" | LR: {lr:.2e} | Loss: {loss:.4f}"
         )
         logger.info(

@@ -126,11 +126,12 @@ Public metrics (available in callback):
 | `train/value_loss` | Value head loss |
 | `train/policy_loss` | Policy head loss |
 | `train/combined_loss` | Combined loss |
-| `train/replay_buffer_size` | Replay buffer size |
+| `train/replay_buffer_size` | Replay buffer size (unique positions) |
+| `train/replay_buffer_duplicate_rate` | Fraction of all positions seen so far that were combined with an existing entry instead of added as new |
 | `train/learning_rate` | Current learning rate |
 | `inference/cache_hit_ratio` | Inference cache hit ratio |
 | `inference/cycle_size` | Mean number of requests per inference run |
-| `inference/batch_size` | Mean batch size per inference run |
+| `inference/bucket_size` | Mean bucket size per inference run |
 
 Use this callback for checkpointing, logging, or early stopping.
 

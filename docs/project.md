@@ -24,9 +24,11 @@ The model must subclass either `AlphaZooNet` or `AlphaZooRecurrentNet` (both fro
 ### Training Orchestrator (`training/alphazoo.py`)
 
 `AlphaZoo` class manages the full training loop:
-1. **Self-play phase** (`_run_selfplay`): Ray `Gamer` actors play games using MCTS, each connected to a centralized `InferenceServer` via shared memory. Trajectories are stored in a `ReplayBuffer`. Sequential mode dispatches `num_games_per_step` games to the gamer pool (`ray.util.ActorPool`) and waits for completion.
+1. **Self-play phase** (`_run_selfplay`): Ray `Gamer` actors play games using MCTS, each connected to a centralized `IpcInferenceServer` via shared memory + named FIFOs. Trajectories are stored in a `ReplayBuffer`. Sequential mode dispatches `num_games_per_step` games to the gamer pool (`ray.util.ActorPool`) and waits for completion.
 2. **Network training phase** (`_train_network`): samples batches from replay buffer, computes policy + value loss, backprops
-3. **Model distribution**: updated weights pushed to the `InferenceServer` via `publish_model()`
+3. **Model distribution**: updated weights pushed to the inference server via `publish_model(state_dict)`. The state dict is sourced from `NetworkTrainer.get_state_dict()` so the orchestrator doesn't reach into the training-side `ModelHost` directly.
+
+The orchestrator creates two `ModelHost` instances at init: one with `training=True` (handed to `NetworkTrainer`) and one with `training=False` (handed to the `IpcInferenceServer`). See the Model Host section below.
 
 Two execution modes:
 - **Sequential**: fixed games per step, then train. Self-play and training never overlap.
@@ -34,9 +36,8 @@ Two execution modes:
 
 ### MCTS (`search/`)
 
-- `Explorer` (`explorer.py`): runs configurable simulations per decision, UCT scoring for exploration/exploitation balance. Two entry points:
-  - `run_mcts(game, inference_client, root_node)` — the main internal loop used by `Gamer` during self-play, with subtree reuse across moves
-  - `select_action_with_mcts_for(env, model, search_config, obs_space_format)` — static one-shot helper for external consumers. Wraps a PettingZoo env, runs a fresh tree behind a `LocalInferenceClient` (in-process, no Ray), returns the action
+- `Explorer` (`explorer.py`): runs configurable simulations per decision, UCT scoring for exploration/exploitation balance. Main entry point is `run_mcts(game, inference_clients, root_node, recurrent_iterations)`, used by `Gamer` during self-play with subtree reuse across moves.
+- `select_action_with_mcts_for(env, model, search_config, obs_space_format, is_recurrent, recurrent_iterations)` (`utils.py`): top-level one-shot helper for external consumers. Wraps a PettingZoo env, builds a `LpcInferenceServer` around `model` (in-process, no Ray), runs a fresh tree, returns the action.
 - `Node` (`node.py`): tree node with visit counts, values, children, priors
 - Action selection: softmax over visit counts early (exploration), argmax late (exploitation), with epsilon fallback
 - Dirichlet noise at root for training diversity
@@ -52,16 +53,29 @@ Two execution modes:
 
 ### Self-Play Records (`training/game_record.py`, `training/replay_buffer.py`)
 
-`GameRecord` stores per-game trajectories (states, MCTS policy targets, value targets). `ReplayBuffer` accumulates records locally in the trainer process and serves training batches.
+`GameRecord` stores per-game trajectories (states, MCTS policy targets, value targets). `ReplayBuffer` accumulates positions locally in the trainer process and serves training batches.
+
+The buffer is keyed by a deterministic 64-bit `blake2b` hash of each state's raw bytes. When the same state is encountered again, its `value` and `policy` targets are updated via a running mean rather than appended as a separate entry, and the entry is moved to the end of the buffer's FIFO order — so frequently-seen positions (typically openings) keep their accumulated stats and don't age out. `window_size` caps the number of unique positions, not raw observations; eviction is LRU on the merged-or-inserted timestamp.
+
+Two auxiliary structures keep sampling O(1): a parallel `_shuffled_keys` list (used for both `get_sample` and `get_slice`) and a `_key_to_shuffled_idx` reverse map used to do O(1) swap-and-pop on eviction. `shuffle()` randomizes `_shuffled_keys` in place and sets `_valid_shuffle = True`; any subsequent insert/evict flips that flag and `get_slice` emits a warning if called while invalid.
 
 ### Distributed Architecture
 
 Ray actors for parallelism:
-- `Gamer` (`training/gamer.py`): each Gamer is a Ray actor that plays games using MCTS. Connects to the `InferenceServer` via an `InferenceClient` for neural network evaluations. Supports `play_games(n)` for sequential mode and `play_forever()`/`stop()` for async mode.
-- `InferenceServer` (`inference/inference_server.py`): centralized Ray actor that holds the model and serves inference requests. Uses named shared memory (`InferenceSlot`) for zero-copy tensor passing and named FIFO pipes for signaling. Each client gets a dedicated slot served by its own thread.
-- `InferenceClient` (`inference/inference_client.py`): lightweight handle that Gamers use to request inference. Writes states into shared memory, signals the server via a FIFO pipe, and reads results back.
-- `LocalInferenceClient` (`inference/local_inference_client.py`): in-process alternative with the same public surface, used when running MCTS outside the Ray-backed training infrastructure (e.g. from `Explorer.select_action_with_mcts_for`).
-- `ReplayBuffer`: shared training data store
+- `Gamer` (`training/gamer.py`): each Gamer is a Ray actor that plays games using MCTS. Holds one or more `IInferenceClient` handles for neural network evaluations. Supports `play_games(n)` for sequential mode and `play_forever()`/`stop()` for async mode.
+- `ReplayBuffer`: shared training data store.
+
+### Inference (`inference/`)
+
+Inference is organised behind two interfaces (`IInferenceClient`, `IInferenceServer`) with three deployment-mode implementations, picked based on where the consumer runs relative to the model:
+
+- **`lpc/`** — Local Procedure Call. `LpcInferenceServer` holds an `nn.Module` and serves requests synchronously to in-process `LpcInferenceClient` instances. No Ray, no shared memory. Used for one-shot external entry points like `select_action_with_mcts_for`.
+- **`ipc/`** — Inter-Process Communication. `IpcInferenceServer` is a Ray actor on the same machine as its clients. It holds a `ModelHost` and serves inference to `IpcInferenceClient`s in other processes. Transport is owned by `InferenceSlot`: named shared memory for zero-copy tensor passing and named FIFO pipes for ready/done signalling. A single dispatcher thread waits on every slot's ready fd via `select()`, services cache hits immediately, and runs one stacked forward pass over the misses each cycle. Used by `AlphaZoo` for training-time self-play.
+- **`rpc/`** — Remote Procedure Call. Reserved for multi-machine deployments; not yet implemented.
+
+Both interfaces are tiny: clients expose `is_recurrent()`, `inference(state)`, and `recurrent_inference(state, iters_to_do, interim_thought)`; servers expose `get_clients()` and `publish_model(state_dict)`. Consumers (e.g. `Gamer`, `Explorer`) depend only on `IInferenceClient`.
+
+Weight updates on the `IpcInferenceServer` are protected by a read-write lock: the dispatcher takes the read lock around forward + cache put for each batch; `publish_model()` takes the write lock to swap weights and invalidate the cache atomically.
 
 ### Caching (`utils/caches/`)
 
@@ -103,23 +117,29 @@ Controls how the network's value output is interpreted relative to players.
 
 - **`False`**: Observations are absolute (same channel layout regardless of player). The network learns to output values from player 1's perspective. No negation is applied during MCTS or target generation.
 
-### Network Interfaces and Manager (`networks/`)
+### Network Interfaces (`networks/interfaces.py`)
 
-**`AlphaZooNet`** and **`AlphaZooRecurrentNet`** are abstract base classes (ABCs) that define the two network interfaces AlphaZoo accepts. Users subclass one of these instead of `nn.Module` directly. Internal architecture is unconstrained — e.g., separate actor and critic heads with no shared trunk are valid.
+**`AlphaZooNet`** and **`AlphaZooRecurrentNet`** are abstract base classes (ABCs) that define the two network shapes AlphaZoo accepts. Users subclass one of these instead of `nn.Module` directly. Internal architecture is unconstrained — e.g., separate actor and critic heads with no shared trunk are valid.
 
-**`NetworkManager`** wraps either ABC with device management (CPU/GPU switching for inference vs training). Exposes two inference methods:
-- `inference(state, training)`: for `AlphaZooNet`, returns `(policy_logits, value_estimate)`.
-- `recurrent_inference(state, training, iters_to_do, interim_thought)`: for `AlphaZooRecurrentNet`, returns `((policy_logits, value_estimate), interim_thought)`.
+### Model Host (`networks/model_host.py`)
 
-Use `network_manager.is_recurrent()` to branch on network type at call sites.
+**`ModelHost`** wraps an `AlphaZooNet` / `AlphaZooRecurrentNet` with device management and a fixed mode chosen at construction time:
 
-Tracks a version counter used by the `InferenceServer` to detect weight changes and invalidate the cache.
+- `ModelHost(model, training=False, device=None)` — moves the model to `device` (auto-detects CUDA when omitted) and calls `model.train()` or `model.eval()` based on `training`. Forward methods wrap themselves in `torch.no_grad()` when `training=False`, and run with grads when `training=True`.
+
+Exposes:
+- `forward(state)` — for `AlphaZooNet`, returns `(policy_logits, value_estimate)`.
+- `recurrent_forward(state, iters_to_do, interim_thought)` — for `AlphaZooRecurrentNet`, returns `((policy_logits, value_estimate), interim_thought)`.
+- `is_recurrent()` — branch on network type at call sites.
+- `get_state_dict(device="cpu")` / `load_state_dict(state_dict)` — for weight publication between the training-side host and the inference-side host.
+
+`AlphaZoo` constructs two hosts up front: one with `training=True` handed to `NetworkTrainer`, one with `training=False` handed to the `IpcInferenceServer`.
 
 ### Metrics (`metrics/`)
 
 Centralized metrics system with local recorders and typed aggregation.
 
-- **`MetricsRecorder`** (`recorder.py`): lightweight, thread-safe recorder used in each component (Gamer, InferenceServer, NetworkTrainer, AlphaZoo). Records metrics with typed methods: `scalar`, `mean`, `counter`, `lifetime_counter`, `lifetime_scalar`. `drain()` returns a snapshot and resets per-step metrics (lifetime metrics persist).
+- **`MetricsRecorder`** (`recorder.py`): lightweight, thread-safe recorder used in each component (Gamer, IpcInferenceServer, NetworkTrainer, AlphaZoo). Records metrics with typed methods: `scalar`, `mean`, `counter`, `lifetime_counter`, `lifetime_scalar`. `drain()` returns a snapshot and resets per-step metrics (lifetime metrics persist).
 - **`MetricsStore`** (`store.py`): central aggregator in the AlphaZoo main process. `ingest()` merges drained dicts from all components by metric type (last-write for scalar, sum for counter, weighted mean for mean). `get_public()` / `get_internal()` filter by visibility.
 - **`MetricEntry`** (`types.py`): dataclass carrying `(type, visibility, value, count)`. The type tag travels with the data so the store merges without per-key logic.
 

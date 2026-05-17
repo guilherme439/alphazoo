@@ -266,7 +266,7 @@ class NetworkTrainer:
         policy_loss: Tensor = policy_loss_function(predicted_policies_flat, target_policies_t)
         value_loss: Tensor = value_loss_function(predicted_values_flat, target_values_t)
 
-        if normalize_policy:
+        if normalize_policy and len(targets) > 1:
             policy_loss = policy_loss / math.log(len(targets))
 
         combined_loss = policy_loss + value_loss

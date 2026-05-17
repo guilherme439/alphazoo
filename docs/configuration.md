@@ -227,7 +227,7 @@ The configured `batch_size` is automatically reduced when it would otherwise be 
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `window_size` | `int` | `10000` | Maximum number of games kept in the replay buffer. Once reached, every new position pushes out the oldest. |
+| `window_size` | `int` | `10000` | Maximum number of unique positions kept in the replay buffer. When the same position shows up more than once, the entries are combined into a single one, so the buffer only grows with distinct positions. Once the cap is reached, adding a new position kicks out the oldest one. |
 | `leak_chance` | `float` | `0.0` | While the buffer is not yet full, the probability that adding a new position also drops the oldest one. `0.0` disables leaking; `1.0` keeps the buffer at its current size by leaking on every add. Has no effect once the buffer is full. |
 
 ### Samples

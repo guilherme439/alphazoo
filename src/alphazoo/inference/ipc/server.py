@@ -147,7 +147,7 @@ class IpcInferenceServer:
         misses: list[tuple[int, torch.Tensor]],
         rlock,
     ) -> None:
-        self.recorder.mean("inference/batch_size", float(len(misses)))
+        self.recorder.mean("inference/bucket_size", float(len(misses)))
 
         states = [state for _, state in misses]
         batch = torch.cat(states, dim=0)

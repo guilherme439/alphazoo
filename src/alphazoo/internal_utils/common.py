@@ -80,3 +80,7 @@ def sync_optimizer_lr(optimizer: Optimizer, scheduler: LRScheduler) -> None:
     """Overwrite the optimizer's per-param-group lr with the scheduler's current lr."""
     for pg, lr in zip(optimizer.param_groups, scheduler.get_last_lr()):
         pg["lr"] = lr
+
+
+def check_interval(step: int, interval: int) -> bool:
+    return interval > 0 and step > 0 and step % interval == 0
