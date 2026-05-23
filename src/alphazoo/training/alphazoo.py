@@ -2,33 +2,33 @@ from __future__ import annotations
 
 import logging
 import os
-import resource
 import time
 from copy import deepcopy
 from datetime import datetime
 from typing import Any, Callable, Optional
-
-import psutil
 import ray
 import torch
 from pettingzoo.utils.env import AECEnv
+from ray.actor import ActorHandle
 from ray.util import ActorPool
-from ray.util.queue import Queue
 
 from ..configs.alphazoo_config import AlphaZooConfig
+from ..configs.search_config import SearchConfig
 from ..ialphazoo_game import IAlphazooGame
-from ..inference.ipc import IpcInferenceServer
+from ..inference.ipc import IpcInferenceClient, IpcInferenceServer
 from ..internal_utils.common import (
-    create_optimizer, create_scheduler, get_policy_loss_fn, get_value_loss_fn,
-    sync_optimizer_lr)
+    create_optimizer, create_scheduler, game_serializer_register_fn_provider,
+    get_policy_loss_fn, get_value_loss_fn, sync_optimizer_lr, distribute_clients, drain_actor_pool_results)
 from ..internal_utils.progress import Spinner
 from ..metrics import MetricsRecorder, MetricsStore
 from ..networks.interfaces import AlphaZooNet, AlphaZooRecurrentNet
 from ..networks.model_host import ModelHost
 from ..profiling import Profiler
 from ..wrappers.pettingzoo_wrapper import PettingZooWrapper
+from .game_record import GameRecord
 from .gamer import Gamer
 from .network_trainer import LossFunction, NetworkTrainer
+from .reanalyser import Reanalyser, ReanalyseRequest, ReanalyseResult
 from .replay_buffer import ReplayBuffer
 
 logger = logging.getLogger("alphazoo")
@@ -130,7 +130,8 @@ class AlphaZoo:
         if replay_buffer_state is not None:
             self.replay_buffer.load_state(replay_buffer_state)
 
-        # ---------------------- METRICS --------------------- #
+
+        # ----------------------- METRICS ---------------------- #
 
         self.recorder = MetricsRecorder()
         self.metrics_store = MetricsStore(public_keys={
@@ -149,6 +150,7 @@ class AlphaZoo:
             "inference/bucket_size",
         })
     
+
     def get_optimizer_state_dict(self) -> dict:
         return self.optimizer.state_dict()
 
@@ -165,7 +167,6 @@ class AlphaZoo:
         self.current_step = self.starting_step
 
         running_mode = config.running.running_mode
-        num_gamers = config.running.num_gamers
         training_steps = int(config.running.training_steps)
 
         update_delay: float = 0
@@ -189,15 +190,45 @@ class AlphaZoo:
             prog_alpha = 0.0
             use_progressive_loss = False
 
-        # ------------- INFERENCE SERVER SETUP -------------- #
+        policy_loss_function, normalize_policy = get_policy_loss_fn(
+            config.learning.policy_loss, config.learning.normalize_ce,
+        )
+        value_loss_function = get_value_loss_fn(config.learning.value_loss)
 
+        # ---------------------- ACTOR SETUP ---------------------- #
+
+        # gamer actors configs
+        num_gamers = config.running.num_gamers
+        search_config = config.search
+        simulation_config = config.search.simulation
+        search_threads = (
+            simulation_config.parallel.num_search_threads
+            if simulation_config.parallel_search else 1
+        )
+        
+        # reanalyse actors configs
+        reanalyse_config = config.learning.replay_buffer.reanalyse
+        num_reanalysers = reanalyse_config.num_workers
+        reanalyse_search_config = reanalyse_config.search
+        reanalyse_simulation_config = reanalyse_search_config.simulation
+        reanalyse_search_threads = (
+            reanalyse_simulation_config.parallel.num_search_threads
+            if reanalyse_simulation_config.parallel_search else 1
+        )
+        self._reanalyse_enabled: bool = num_reanalysers > 0
+        self._register_serializer_fn: Optional[Callable[[], None]] = None
+        if self._reanalyse_enabled:
+            self._register_serializer_fn = game_serializer_register_fn_provider(type(self.game))
+            self._register_serializer_fn()
+
+        # inference server actor
         state_shape = self.game.get_state_shape()
         state_size = self.game.get_state_size()
         action_size = self.game.get_action_size()
 
-        simulation_config = config.search.simulation
-        search_threads = simulation_config.parallel.num_search_threads if simulation_config.parallel_search else 1
-        total_clients = num_gamers * search_threads
+        gamer_clients_total = num_gamers * search_threads
+        reanalyser_clients_total = num_reanalysers * reanalyse_search_threads
+        total_clients = gamer_clients_total + reanalyser_clients_total
 
         inference_num_gpus = 1 if torch.cuda.is_available() else 0 # server doesn't have gpu/data paralellism yet
         # In the future the server class used should depend on the available resources 
@@ -211,44 +242,32 @@ class AlphaZoo:
             action_size,
             pred_iterations,
         )
-        self._inference_clients = ray.get(self.inference_server.get_clients.remote())
         self._server_future = self.inference_server.run.remote()
 
-        self.record_queue: Queue = Queue()
-
-        # ------------------- LOSS FUNCTIONS ------------------- #
-
-        policy_loss_function, normalize_policy = get_policy_loss_fn(
-            config.learning.policy_loss, config.learning.normalize_ce,
+        inference_clients = ray.get(self.inference_server.get_clients.remote())
+        gamer_clients, reanalyser_clients = distribute_clients(
+            inference_clients, 
+            num_gamers,
+            search_threads, 
+            num_reanalysers,
+            reanalyse_search_threads
         )
-        value_loss_function = get_value_loss_fn(config.learning.value_loss)
+        self._gamers: list[ActorHandle] = self._create_gamers(gamer_clients, search_config, pred_iterations)
 
-        # --------------------- TRAINING ---------------------- #
+        self._reanalysers: list[ActorHandle] = []
+        if self._reanalyse_enabled:
+            self._reanalysers = self._create_reanalysers(reanalyser_clients, reanalyse_search_config, pred_iterations)
+
+
+        # ----------------------- TRAINING ----------------------- #
 
         learning_method = config.learning.learning_method
         batch_size = self._batch_size
 
-        if running_mode == "sequential":
-            self.games_per_step = num_games_per_step
-            logger.info("\n\nRunning until training step number " + str(training_steps) +
-                       " with " + str(self.games_per_step) + " games in each step:")
-        elif running_mode == "asynchronous":
-            wait_desc = str(update_delay) + "s delay"
-            if async_min_num_games is not None:
-                wait_desc += " or " + str(async_min_num_games) + " games"
-            logger.info("\n\nRunning until training step number " + str(training_steps) +
-                       " with " + wait_desc + " between each step:")
-
-        if cache_enabled:
-            logger.info("-Using cache for inference results.")
-        if torch.cuda.is_available():
-            logger.info("-GPU: " + torch.cuda.get_device_name(0))
-        else:
-            logger.info("-GPU: not available, using CPU.")
-        if self.starting_step != 0:
-            logger.info("-Starting from iteration " + str(self.starting_step + 1) + ".\n")
-
-        logger.info("\n\n--------------------------------\n")
+        self._log_training_run_info(
+            running_mode, training_steps, num_games_per_step,
+            update_delay, async_min_num_games, cache_enabled,
+        )
 
         run_start = time.time()
 
@@ -258,19 +277,19 @@ class AlphaZoo:
             self._profiling_dir = os.path.join("profiling", timestamp)
             profiler = Profiler(self._profiling_dir)
             profiler.start()
+        
 
-        # ---- GAMER SETUP ---- #
+        # ---- STARTUP ACTORS ---- #     
 
-        search_config = self.config.search
-        self._gamers = self._create_gamers(
-            num_gamers, search_config, pred_iterations,
-        )
-
-        # ---- START ASYNC GAMERS ---- #
-
-        async_futures: list[Any] = []
-        if running_mode == "asynchronous":
-            async_futures.extend(gamer.play_forever.remote() for gamer in self._gamers)
+        self._gamer_pool: Optional[ActorPool] = None
+        if running_mode == "sequential":
+            self._gamer_pool = ActorPool(self._gamers)
+        else:
+            async_futures = [gamer.play_forever.remote() for gamer in self._gamers]
+            
+        self._reanalyser_pool: Optional[ActorPool] = None
+        if self._reanalyse_enabled:
+            self._reanalyser_pool = ActorPool(self._reanalysers)
 
         # ---- MAIN TRAINING LOOP ---- #
 
@@ -279,6 +298,12 @@ class AlphaZoo:
             self.current_step = step
             logger.info("\nStep " + str(step) + "/" + str(training_steps) + "\n")
             step_start = time.time()
+
+            if self._reanalyse_enabled:
+                self._run_reanalyse(
+                    reanalyse_config.positions_per_step,
+                    reanalyse_config.min_buffer_fill_ratio
+                )
 
             if running_mode == "sequential":
                 self._run_selfplay(num_games_per_step)
@@ -322,7 +347,12 @@ class AlphaZoo:
             for gamer in self._gamers:
                 gamer.stop.remote()
             ray.get(async_futures)
-            self._drain_record_queue()
+            self._collect_completed_games()
+
+        if self._reanalyse_enabled:
+            results = drain_actor_pool_results(self._reanalyser_pool, block=True)
+            for result in results:
+                self.replay_buffer.apply_reanalyse_result(result, self.current_step)
 
         self.inference_server.stop.remote()
         ray.get(self._server_future)
@@ -336,6 +366,45 @@ class AlphaZoo:
         logger.info("All done.\nExiting")
 
 
+    def _create_gamers(
+        self,
+        gamer_clients: list[list[IpcInferenceClient]],
+        search_config: SearchConfig,
+        pred_iterations: int,
+    ) -> list[ActorHandle]:
+        gamers: list[ActorHandle] = []
+        for clients in gamer_clients:
+            gamer = Gamer.remote(
+                self.game,
+                search_config,
+                pred_iterations,
+                self.config.data.player_dependent_value,
+                clients,
+                Profiler(self._profiling_dir) if self.profiling else None,
+                self._reanalyse_enabled,
+                self._register_serializer_fn,
+            )
+            gamers.append(gamer)
+        return gamers
+
+    def _create_reanalysers(
+        self,
+        reanalyser_clients: list[list[IpcInferenceClient]],
+        search_config: SearchConfig,
+        pred_iterations: int,
+    ) -> list[ActorHandle]:
+        reanalysers: list[ActorHandle] = []
+        for clients in reanalyser_clients:
+            reanalyser = Reanalyser.remote(
+                search_config,
+                pred_iterations,
+                self.config.data.player_dependent_value,
+                clients,
+                self._register_serializer_fn,
+            )
+            reanalysers.append(reanalyser)
+        return reanalysers
+    
     def _train_network(
         self,
         learning_method: str,
@@ -346,8 +415,6 @@ class AlphaZoo:
         use_progressive_loss: bool,
         batch_size: int,
     ) -> None:
-        self._drain_record_queue()
-
         learning_config = self.config.learning
         recurrent_config = self.config.recurrent
         train_iterations = recurrent_config.train_iterations if recurrent_config is not None else 1
@@ -388,6 +455,18 @@ class AlphaZoo:
         else:
             raise Exception("Bad learning_method config.")
 
+    def _wait_for_selfplay(self, update_delay: float, min_num_games: Optional[int]) -> None:
+        deadline = time.time() + update_delay
+        poll_interval = 0.2
+        games_played = 0
+
+        with Spinner("Waiting for selfplay ", max_duration=update_delay):
+            while time.time() < deadline:
+                games_played += self._collect_completed_games()
+                if min_num_games is not None and games_played >= min_num_games:
+                    return
+                time.sleep(poll_interval)
+
     def _run_selfplay(self, num_games: int) -> None:
         num_games_per_task = 1
 
@@ -397,58 +476,42 @@ class AlphaZoo:
 
         with Spinner(f"Self-play "):
             while pool.has_next():
-                pool.get_next_unordered()
+                records: list[GameRecord] = pool.get_next_unordered()
+                for record in records:
+                    self.replay_buffer.save_game_record(record, self.current_step)
 
-    def _wait_for_selfplay(self, update_delay: float, min_num_games: Optional[int]) -> None:
-        deadline = time.time() + update_delay
-        poll_interval = 0.2
+    def _run_reanalyse(self, positions_per_step: int, min_buffer_fill_ratio: float) -> None:
+        # results from previous iterations
+        results: list[ReanalyseResult] = drain_actor_pool_results(self._reanalyser_pool)
+        for result in results:
+            self.replay_buffer.apply_reanalyse_result(result, self.current_step)
 
-        with Spinner("Waiting for selfplay ", max_duration=update_delay):
-            while time.time() < deadline:
-                if min_num_games is not None and self.record_queue.qsize() >= min_num_games:
-                    return
-                time.sleep(poll_interval)
+        if positions_per_step <= 0:
+            return
+        if self.replay_buffer.fill_ratio() < min_buffer_fill_ratio:
+            return
 
-    def _create_gamers(
-        self,
-        num_gamers: int,
-        search_config: Any,
-        pred_iterations: int,
-    ) -> list[Any]:
-        threads_per_gamer: int = 1
-        if search_config.simulation.parallel_search:
-            threads_per_gamer = search_config.simulation.parallel.num_search_threads
-
-        clients = self._inference_clients
-
-        gamers: list[Any] = []
-        for gamer_idx in range(num_gamers):
-            first_client_idx = gamer_idx * threads_per_gamer
-            gamer_clients = clients[first_client_idx : first_client_idx + threads_per_gamer]
-            gamer = Gamer.remote(
-                self.record_queue,
-                deepcopy(self.game),
-                search_config,
-                pred_iterations,
-                self.config.data.player_dependent_value,
-                gamer_clients,
-                Profiler(self._profiling_dir) if self.profiling else None,
-            )
-            gamers.append(gamer)
-        return gamers
-    
-    def _publish_model(self) -> None:
-        state_dict = self.trainer.get_state_dict()
-        ray.get(self.inference_server.publish_model.remote(state_dict))
-
-    def _drain_record_queue(self) -> None:
-        while not self.record_queue.empty():
-            record = self.record_queue.get(block=False)
-            self.replay_buffer.save_game_record(record, self.current_step)
+        oldest_entries = self.replay_buffer.pop_oldest(positions_per_step)
+        for key, entry in oldest_entries:
+            request = ReanalyseRequest(key=key, entry=entry)
+            self._reanalyser_pool.submit(lambda actor, req: actor.process.remote(req), request)      
+            
+    def _collect_completed_games(self) -> int:
+        all_game_record_lists = ray.get([gamer.get_completed_games.remote() for gamer in self._gamers])
+        total_completed_games = 0
+        for record_list in all_game_record_lists:
+            total_completed_games += len(record_list)
+            for record in record_list:
+                self.replay_buffer.save_game_record(record, self.current_step)
+        return total_completed_games
 
     def _capped_batch_size(self, batch_size: int, replay_size: int, ratio: float) -> int:
         """Cap `batch_size` at `ratio` of `replay_size` (minimum 1)."""
         return max(1, min(batch_size, int(ratio * replay_size)))
+    
+    def _publish_model(self) -> None:
+        state_dict = self.trainer.get_state_dict()
+        ray.get(self.inference_server.publish_model.remote(state_dict))
 
     def _get_metrics(self) -> dict:
         return self.recorder.drain()
@@ -494,6 +557,58 @@ class AlphaZoo:
 
         return self.metrics_store.get_public(), self.metrics_store.get_internal()
 
+    def _finalize_profiling(self, profiler: Profiler, running_mode: Optional[str] = None) -> None:
+        # collect actor profiles
+        futures = [
+            gamer.get_profile_stats.remote()
+            for gamer in self._gamers
+        ]
+        actor_bytes_list = ray.get(futures)
+        actor_bytes = Profiler.merge(actor_bytes_list)
+        profiler.save_data_to_file(Profiler.bytes_to_pstats(actor_bytes), "actor_profile.prof")
+
+        # main process profile
+        main_bytes = profiler.stop()
+        profiler.save_data_to_file(Profiler.bytes_to_pstats(main_bytes), "main_profile.prof")
+
+        internal = self.metrics_store.get_internal()
+        profiler.save_metrics_to_file(internal, running_mode=running_mode)
+
+        d = profiler.output_dir
+        logger.info(f"\nProfiling results: {d}/")
+        logger.info(f"  snakeviz {d}/main_profile.prof")
+        logger.info(f"  snakeviz {d}/actor_profile.prof")
+
+    def _log_training_run_info(
+        self,
+        running_mode: str,
+        training_steps: int,
+        num_games_per_step: int,
+        update_delay: float,
+        async_min_num_games: Optional[int],
+        cache_enabled: bool,
+    ) -> None:
+        if running_mode == "sequential":
+            logger.info("\n\nRunning until training step number " + str(training_steps) +
+                       " with " + str(num_games_per_step) + " games in each step:")
+        elif running_mode == "asynchronous":
+            wait_desc = str(update_delay) + "s delay"
+            if async_min_num_games is not None:
+                wait_desc += " or " + str(async_min_num_games) + " games"
+            logger.info("\n\nRunning until training step number " + str(training_steps) +
+                       " with " + wait_desc + " between each step:")
+
+        if cache_enabled:
+            logger.info("-Using cache for inference results.")
+        if torch.cuda.is_available():
+            logger.info("-GPU: " + torch.cuda.get_device_name(0))
+        else:
+            logger.info("-GPU: not available, using CPU.")
+        if self.starting_step != 0:
+            logger.info("-Starting from iteration " + str(self.starting_step + 1) + ".\n")
+
+        logger.info("\n\n--------------------------------\n")
+
     def _log_step_metrics(self, public: dict[str, Any], internal: dict[str, Any]) -> None:
         games = public.get("rollout/games", 0)
         avg_moves = public.get("rollout/episode_len_mean", 0.0)
@@ -518,25 +633,3 @@ class AlphaZoo:
             f"Selfplay: {selfplay_time:.3f}s | Training: {training_time:.3f}s"
             f" | Step: {step_time:.3f}s"
         )
-
-    def _finalize_profiling(self, profiler: Profiler, running_mode: Optional[str] = None) -> None:
-        # Collect actor profiles
-        futures = [
-            gamer.get_profile_stats.remote()
-            for gamer in self._gamers
-        ]
-        actor_bytes_list = ray.get(futures)
-        actor_bytes = Profiler.merge(actor_bytes_list)
-        profiler.save_data_to_file(Profiler.bytes_to_pstats(actor_bytes), "actor_profile.prof")
-
-        # Main process profile
-        main_bytes = profiler.stop()
-        profiler.save_data_to_file(Profiler.bytes_to_pstats(main_bytes), "main_profile.prof")
-
-        internal = self.metrics_store.get_internal()
-        profiler.save_metrics_to_file(internal, running_mode=running_mode)
-
-        d = profiler.output_dir
-        logger.info(f"\nProfiling results: {d}/")
-        logger.info(f"  snakeviz {d}/main_profile.prof")
-        logger.info(f"  snakeviz {d}/actor_profile.prof")

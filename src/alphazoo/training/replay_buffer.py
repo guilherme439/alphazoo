@@ -5,12 +5,16 @@ import logging
 import random
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any, Optional
 
 import numpy as np
 import torch
 
+from ..ialphazoo_game import IAlphazooGame
 from .game_record import GameRecord
+
+if TYPE_CHECKING:
+    from .reanalyser import ReanalyseResult
 
 logger = logging.getLogger("alphazoo")
 
@@ -19,9 +23,10 @@ logger = logging.getLogger("alphazoo")
 class BufferEntry:
     state: torch.Tensor
     value: float
-    policy: np.ndarray
+    policy: torch.Tensor
     count: int
     last_update: int
+    game_snapshot: Optional[IAlphazooGame] = None
 
 
 class ReplayBuffer:
@@ -47,9 +52,10 @@ class ReplayBuffer:
 
     def save_game_record(self, record: GameRecord, iteration: int) -> None:
         for i in range(len(record)):
-            state = record.states[i]
+            state = record.get_state(i)
             value, policy = record.make_target(i)
-            self._save_position(state, value, policy, iteration)
+            game = record.get_game(i)
+            self._save_position(state, value, policy, iteration, game)
 
     def shuffle(self) -> None:
         random.shuffle(self._shuffled_keys)
@@ -76,11 +82,33 @@ class ReplayBuffer:
             for i in batch_indexes
         ]
 
-    def duplicate_rate(self) -> float:
-        if self._total_positions_seen == 0:
-            return 0.0
-        return self._duplicates_absorbed / self._total_positions_seen
+    def pop_oldest(self, n: int) -> list[tuple[int, BufferEntry]]:
+        popped_entries: list[tuple[int, BufferEntry]] = []
 
+        entries_to_pop: int = min(n, len(self._buffer))
+        for _ in range(entries_to_pop):
+            popped_entries.append(self._pop_head())
+        return popped_entries
+
+    def apply_reanalyse_result(self, reanalyse_result: ReanalyseResult, current_step: int) -> None:
+        key: int = reanalyse_result.original_key
+        original_entry: BufferEntry = reanalyse_result.original_entry
+        reanalysed_value = reanalyse_result.value
+        reanalysed_policy = reanalyse_result.policy
+
+        updated_count = original_entry.count + 1
+        updated_value = original_entry.value + (reanalysed_value - original_entry.value) / updated_count
+        updated_policy = reanalysed_policy
+        reanalysed_entry: BufferEntry = BufferEntry(
+            original_entry.state,
+            updated_value,
+            updated_policy,
+            updated_count,
+            current_step,
+            original_entry.game_snapshot
+        )
+        self._add_to_buffer(key, reanalysed_entry)
+    
     def get_state(self) -> dict:
         return {
             'buffer': self._buffer,
@@ -99,48 +127,79 @@ class ReplayBuffer:
 
         self._resize_to_window()
 
-    def _save_position(self, state: torch.Tensor, value: float, policy: np.ndarray, iteration: int) -> None:
+    def duplicate_rate(self) -> float:
+        if self._total_positions_seen == 0:
+            return 0.0
+        return self._duplicates_absorbed / self._total_positions_seen
+
+    def fill_ratio(self) -> float:
+        return len(self._buffer) / self._window_size
+    
+
+    def _save_position(
+        self,
+        state: torch.Tensor,
+        value: float,
+        policy: torch.Tensor,
+        iteration: int,
+        game_snapshot: IAlphazooGame | None,
+    ) -> None:
         self._total_positions_seen += 1
         key = self.hash_key(state)
+        entry = BufferEntry(
+            state=state,
+            value=value,
+            policy=policy.clone(),
+            count=1,
+            last_update=iteration,
+            game_snapshot=game_snapshot
+        )
+        self._add_to_buffer(key, entry)
+
+    def _add_to_buffer(self, key: int, entry: BufferEntry) -> None:
         existing = self._buffer.get(key)
-        if existing is not None:
-            self._merge_entry(existing, value, policy, iteration)
-            # Move the merged entry to the end of the buffer so frequently-seen
-            # positions are kept alive instead of evicted on FIFO schedule.
+        if existing:
+            self._merge_entry(existing, entry)
             self._buffer.move_to_end(key)
             self._duplicates_absorbed += 1
         else:
-            if self._is_full() or self._should_leak():
-                self._evict_oldest()
-            entry = BufferEntry(state=state, value=value, policy=policy.copy(), count=1, last_update=iteration)
-            self._insert(key, entry)
-            self._valid_shuffle = False
+            self._new_entry(key, entry)
+
+    def _merge_entry(self, old_entry: BufferEntry, new_entry: BufferEntry) -> None:
+        # count-weighted mean of the two entries' value and policy, written into old_entry.
+        total = old_entry.count + new_entry.count
+        old_entry.value = (old_entry.value * old_entry.count + new_entry.value * new_entry.count) / total
+        old_entry.policy = (old_entry.policy * old_entry.count + new_entry.policy * new_entry.count) / total
+        old_entry.count = total
+        old_entry.last_update = new_entry.last_update
+
+    def _new_entry(self, key: int, entry: BufferEntry) -> None:
+        if self._is_full() or self._should_leak():
+            self._evict_oldest()
+        self._insert(key, entry)
+        self._valid_shuffle = False
 
     def _insert(self, key: int, entry: BufferEntry) -> None:
         self._buffer[key] = entry
         self._shuffled_keys.append(key)
         self._key_to_shuffled_idx[key] = len(self._shuffled_keys) - 1
 
-    def _merge_entry(self, entry: BufferEntry, new_value: float, new_policy: np.ndarray, iteration: int) -> None:
-        # Running mean update.
-        n = entry.count + 1
-        entry.value += (new_value - entry.value) / n
-        entry.policy += (new_policy - entry.policy) / n
-        entry.count = n
-        entry.last_update = iteration
-
     def _evict_oldest(self) -> None:
-        evicted_key, _ = self._buffer.popitem(last=False)
+        self._pop_head()
 
-        # Simply removing the key would be 0(N), cause all the remaining keys would need to be shifted.
+    def _pop_head(self) -> tuple[int, BufferEntry]:
+        key, entry = self._buffer.popitem(last=False)
+
+        # Simply removing the key would be 0(N), 'cause all the remaining keys would need to be shifted.
         # To keep the operation O(1), we pop the last element and swap it with the element-to-be-deleted.
-        i = self._key_to_shuffled_idx.pop(evicted_key)
+        i = self._key_to_shuffled_idx.pop(key)
         last_key = self._shuffled_keys.pop()
         if i < len(self._shuffled_keys):
             self._shuffled_keys[i] = last_key
             self._key_to_shuffled_idx[last_key] = i
+        return key, entry
 
-    def _entry_as_tuple(self, entry: BufferEntry) -> tuple[torch.Tensor, tuple[float, np.ndarray]]:
+    def _entry_as_tuple(self, entry: BufferEntry) -> tuple[torch.Tensor, tuple[float, torch.Tensor]]:
         return entry.state, (entry.value, entry.policy)
 
     def _is_full(self) -> bool:

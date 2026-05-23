@@ -1,44 +1,11 @@
 from __future__ import annotations
 
-import dataclasses
-import types
 from dataclasses import dataclass, field
-from typing import Literal, Union, get_args, get_origin, get_type_hints, Optional
+from typing import Literal, Optional
 
-import yaml
+from omegaconf import OmegaConf
 
 from .search_config import SearchConfig
-
-
-def _resolve_dataclass_type(tp: type) -> Optional[type]:
-    if dataclasses.is_dataclass(tp):
-        return tp
-    origin = get_origin(tp)
-    if origin is Union or isinstance(tp, types.UnionType):
-        for arg in get_args(tp):
-            if arg is not type(None) and dataclasses.is_dataclass(arg):
-                return arg
-    return None
-
-
-def _dataclass_from_dict(cls: type, data: dict) -> object:
-    if data is None:
-        return cls()
-
-    hints = get_type_hints(cls)
-    kwargs = {}
-
-    for f in dataclasses.fields(cls):
-        if f.name not in data:
-            continue
-        value = data[f.name]
-        target = _resolve_dataclass_type(hints[f.name])
-        if isinstance(value, dict) and target is not None:
-            kwargs[f.name] = _dataclass_from_dict(target, value)
-        else:
-            kwargs[f.name] = value
-
-    return cls(**kwargs)
 
 
 @dataclass
@@ -97,9 +64,18 @@ class DataConfig:
 
 
 @dataclass
+class ReanalyseConfig:
+    num_workers: int = 0
+    positions_per_step: int = 0
+    min_buffer_fill_ratio: float = 0.5
+    search: SearchConfig = field(default_factory=SearchConfig)
+
+
+@dataclass
 class ReplayBufferConfig:
     window_size: int = 10000
     leak_chance: float = 0.0
+    reanalyse: ReanalyseConfig = field(default_factory=ReanalyseConfig)
 
 
 @dataclass
@@ -147,6 +123,11 @@ class AlphaZooConfig:
 
     @classmethod
     def from_yaml(cls, path: str) -> AlphaZooConfig:
-        with open(path, "r") as f:
-            data = yaml.safe_load(f)
-        return _dataclass_from_dict(cls, data)  # type: ignore[return-value]
+        schema = OmegaConf.structured(cls)
+        cfg = OmegaConf.merge(schema, OmegaConf.load(path))
+
+        cfg.learning.replay_buffer.reanalyse.search = OmegaConf.merge(
+            cfg.search,
+            cfg.learning.replay_buffer.reanalyse.search
+        )
+        return OmegaConf.to_object(cfg)  # type: ignore[return-value]

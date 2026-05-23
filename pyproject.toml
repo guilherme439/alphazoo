@@ -22,11 +22,12 @@ dependencies = [
     "gymnasium~=1.1",
     "ray~=2.7",
     "scipy~=1.11",
-    "ruamel.yaml~=0.17",
     "psutil~=5.9",
     "termcolor~=2.3",
     "progress~=1.6",
     "readerwriterlock~=1.0",
+    "ruamel.yaml~=0.17",
+    "omegaconf>=2.4.0.dev0",
 ]
 
 [project.urls]

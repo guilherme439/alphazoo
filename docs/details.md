@@ -89,6 +89,9 @@ class MyGame(IAlphazooGame):
 
 `shallow_clone()` must return a fully independent copy — MCTS uses it to explore hypothetical moves.
 
+
+If you enable reanalyse and your game holds state that does *not* survive `cloudpickle.dumps` / `cloudpickle.loads`, you must override the (de)serialize methods in `IAlphazooGame`. Without reanalyse, the methods are never called so you dont need to worry.
+
 ---
 
 ## Configuration
@@ -98,6 +101,7 @@ All config is done through `AlphaZooConfig` and its nested dataclasses. Every fi
 See the [Configuration Reference](configuration.md) for a complete list of all options, including the full config tree, field types, defaults, and descriptions.
 
 A complete example is available at [`configs/examples/connect_four.yaml`](../configs/examples/connect_four.yaml).
+
 
 ---
 

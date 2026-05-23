@@ -9,6 +9,7 @@ from copy import deepcopy
 from typing import Any
 
 import numpy as np
+import ray.cloudpickle as cloudpickle
 import torch
 from gymnasium.spaces.utils import flatdim
 from pettingzoo.utils.env import AECEnv
@@ -74,7 +75,7 @@ class PettingZooWrapper(IAlphazooGame):
             setattr(clone, key, val)
         clone.env = self._clone_pettingzoo_env(self.env)
         return clone
-
+    
     def copy_state_from(self, source: "PettingZooWrapper") -> None:
         for key, val in source.__dict__.items():
             if key == 'env':
@@ -92,6 +93,45 @@ class PettingZooWrapper(IAlphazooGame):
                 break
             src_layer = src_layer.env
             dst_layer = dst_layer.env
+
+    @staticmethod
+    def serialize(game: "PettingZooWrapper") -> bytes:
+        # Extract each env layer's (class, attrs) into a plain dict so pickle
+        # never invokes any layer's __getstate__. gymnasium's EzPickle base
+        # overrides __getstate__ to discard runtime state on round-trip.
+        wrapper_attrs = {k: v for k, v in game.__dict__.items() if k != 'env'}
+        env_layers: list[tuple[type, dict]] = []
+        layer = game.env
+        while True:
+            attrs = {k: v for k, v in vars(layer).items() if k != 'env'}
+            env_layers.append((type(layer), attrs))
+            if not hasattr(layer, 'env'):
+                break
+            layer = layer.env
+        return cloudpickle.dumps({
+            'wrapper_class': type(game),
+            'wrapper': wrapper_attrs,
+            'env_layers': env_layers,
+        })
+
+    @staticmethod
+    def deserialize(data: bytes) -> "PettingZooWrapper":
+        # Rebuild each env layer via object.__new__ to skip __init__ (which
+        # would reset the env) and link them inside-out into a layer chain.
+        payload = cloudpickle.loads(data)
+        obj = object.__new__(payload['wrapper_class'])
+        obj.__dict__.update(payload['wrapper'])
+
+        prev: Any = None
+        for layer_type, attrs in reversed(payload['env_layers']):
+            layer = object.__new__(layer_type)
+            for attr_name, attr_value in attrs.items():
+                setattr(layer, attr_name, attr_value)
+            if prev is not None:
+                layer.env = prev
+            prev = layer
+        obj.env = prev
+        return obj
 
 
     # ------------------------------------------------------------------
@@ -182,13 +222,6 @@ class PettingZooWrapper(IAlphazooGame):
 
 
     def _clone_pettingzoo_env(self, original_env: Any) -> Any:
-        """
-        Clone a PettingZoo environment, preserving its full runtime state.
-
-        Bypasses PettingZoo's EzPickle (which discards runtime state on deepcopy)
-        by constructing bare objects with object.__new__ and copying attributes
-        directly. This avoids the cost of __init__, reset(), or double-deepcopy.
-        """
         layers = []
         layer = original_env
         while True:
@@ -209,7 +242,7 @@ class PettingZooWrapper(IAlphazooGame):
             prev_clone = clone_layer
 
         return prev_clone
-    
+
     def _copy_attr(self, value: Any) -> Any:
         if isinstance(value, (str, int, float, bool, type(None), tuple)):
             return value

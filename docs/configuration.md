@@ -4,25 +4,23 @@ All configuration is done through `AlphaZooConfig` and its nested dataclasses. E
 
 A complete example is available at [`configs/examples/connect_four.yaml`](../configs/examples/connect_four.yaml).
 
-## Table of Contents
+## Quick Links
 
-- [Config Tree](#config-tree)
 - [Top-Level](#top-level)
+- [Running](#running)
+  - [Modes](#running-modes)
+- [Cache](#cache)
 - [Data](#data)
   - [Value Perspective](#value-perspective)
   - [Observation Formats](#observation-formats)
-- [Running](#running)
-  - [Running Modes](#running-modes)
-  - [Sequential](#sequential)
-  - [Asynchronous](#asynchronous)
-- [Cache](#cache)
-- [Recurrent](#recurrent)
-  - [Progressive Loss](#progressive-loss)
 - [Learning](#learning)
+  - [Replay Buffer](#replay-buffer)
+    - [Reanalyse](#reanalyse)
   - [Samples](#samples)
   - [Epochs](#epochs)
+- [Recurrent](#recurrent)
+  - [Progressive Loss](#progressive-loss)
 - [Optimizer](#optimizer)
-  - [SGD](#sgd)
 - [Scheduler](#scheduler)
 - [Search](#search)
   - [Simulation](#simulation)
@@ -61,7 +59,12 @@ AlphaZooConfig
 ├── learning: LearningConfig
 │   ├── replay_buffer: ReplayBufferConfig
 │   │   ├── window_size
-│   │   └── leak_chance
+│   │   ├── leak_chance
+│   │   └── reanalyse: ReanalyseConfig
+│   │       ├── num_workers
+│   │       ├── positions_per_step
+│   │       ├── min_buffer_fill_ratio
+│   │       └── search: SearchConfig
 │   ├── value_loss
 │   ├── policy_loss
 │   ├── normalize_ce
@@ -229,6 +232,24 @@ The configured `batch_size` is automatically reduced when it would otherwise be 
 |-------|------|---------|-------------|
 | `window_size` | `int` | `10000` | Maximum number of unique positions kept in the replay buffer. When the same position shows up more than once, the entries are combined into a single one, so the buffer only grows with distinct positions. Once the cap is reached, adding a new position kicks out the oldest one. |
 | `leak_chance` | `float` | `0.0` | While the buffer is not yet full, the probability that adding a new position also drops the oldest one. `0.0` disables leaking; `1.0` keeps the buffer at its current size by leaking on every add. Has no effect once the buffer is full. |
+| `reanalyse` | `ReanalyseConfig` | disabled | Re-runs MCTS on buffered positions to refresh their targets. |
+
+`leak_chance` and `reanalyse` (below) are two complementary tools that address the same underlying problem: stale entries in the buffer. `leak_chance` evicts entries probabilistically to make room for fresher ones. `reanalyse` keeps entries alive but refreshes their targets with the current network. They are not really meant to be used together but they can be.
+
+#### Reanalyse
+
+Re-runs MCTS on positions already in the buffer using the current network, refreshing their policy and value targets. Disabled by default.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `num_workers` | `int` | `0` | Number of parallel reanalyse workers. `0` disables reanalyse entirely. |
+| `positions_per_step` | `int` | `0` | Number of oldest entries dispatched to the reanalyser pool per training step. |
+| `min_buffer_fill_ratio` | `float` | `0.5` | Skip reanalyse until `len(buffer) / window_size` reaches this threshold. |
+| `search` | `SearchConfig` | inherits from top-level `search` | MCTS search config for reanalyse |
+
+The `search` block uses the top-level `search` as the base and overrides it with any values defined here. This is usefull to reanalyse games with a slightly modified search (for example: using a larger simulation count)
+
+Enabling reanalyse stores a game snapshot per unique buffer entry — memory scales linearly with `window_size`.
 
 ### Samples
 

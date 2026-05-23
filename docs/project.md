@@ -48,21 +48,41 @@ Two execution modes:
 - `reset()`, `step()`, `observe()`, `obs_to_state()`, `action_mask()`
 - `is_terminal()`, `get_terminal_value()`, `shallow_clone()`, `copy_state_from()`
 - `get_action_shape()`, `get_action_size()`, `get_state_shape()`, `get_state_size()`, `get_length()`
+- `serialize(game) -> bytes` and `deserialize(data) -> IAlphazooGame` (both `@staticmethod`; concrete defaults using `cloudpickle.dumps` / `cloudpickle.loads`; overridable for games whose state does not survive a cloudpickle round-trip). Called only by the reanalyse path.
 
 `PettingZooWrapper` (`wrappers/pettingzoo_wrapper.py`) is the default implementation of `IAlphazooGame` for PettingZoo AECEnv environments.
 
 ### Self-Play Records (`training/game_record.py`, `training/replay_buffer.py`)
 
-`GameRecord` stores per-game trajectories (states, MCTS policy targets, value targets). `ReplayBuffer` accumulates positions locally in the trainer process and serves training batches.
+`GameRecord` stores per-game trajectories: internal arrays `_states`, `_players`, `_policies`, and (when reanalyse is enabled) `_games` carrying `shallow_clone()` snapshots of the game taken before each MCTS run. The public surface is `store_step(game)`, `store_visit_counts(root_node)`, `set_terminal_value(value)`, `make_target(i)`, `get_state(i)`, `get_game(i)`, and `__len__`. `store_step` takes the live game and clones internally only when `store_games=True` was passed at construction.
 
-The buffer is keyed by a deterministic 64-bit `blake2b` hash of each state's raw bytes. When the same state is encountered again, its `value` and `policy` targets are updated via a running mean rather than appended as a separate entry, and the entry is moved to the end of the buffer's FIFO order — so frequently-seen positions (typically openings) keep their accumulated stats and don't age out. `window_size` caps the number of unique positions, not raw observations; eviction is LRU on the merged-or-inserted timestamp.
+`ReplayBuffer` accumulates positions locally in the trainer process and serves training batches. The buffer is keyed by a deterministic 64-bit `blake2b` hash of each state's raw bytes. When the same state is encountered again, its `value` and `policy` targets are updated via a running mean rather than appended as a separate entry, and the entry is moved to the end of the buffer's FIFO order — so frequently-seen positions (typically openings) keep their accumulated stats and don't age out. `window_size` caps the number of unique positions, not raw observations; eviction is LRU on the merged-or-inserted timestamp.
 
-Two auxiliary structures keep sampling O(1): a parallel `_shuffled_keys` list (used for both `get_sample` and `get_slice`) and a `_key_to_shuffled_idx` reverse map used to do O(1) swap-and-pop on eviction. `shuffle()` randomizes `_shuffled_keys` in place and sets `_valid_shuffle = True`; any subsequent insert/evict flips that flag and `get_slice` emits a warning if called while invalid.
+Each `BufferEntry` has `state`, `value`, `policy`, `count`, `last_update`, and `game_snapshot: IAlphazooGame | None`. The snapshot is populated only when reanalyse is enabled — `None` otherwise.
+
+Two auxiliary structures keep sampling O(1): a parallel `_shuffled_keys` list (used for both `get_sample` and `get_slice`) and a `_key_to_shuffled_idx` reverse map used to do O(1) swap-and-pop on eviction. `shuffle()` randomizes `_shuffled_keys` in place and sets `_valid_shuffle = True`; any subsequent insert/evict flips that flag and `get_slice` emits a warning if called while invalid. `_evict_oldest` and `pop_oldest(n)` both go through `_pop_head` which performs the swap-and-pop.
+
+### Reanalyse (`training/reanalyser.py`, `training/targets.py`)
+
+When `learning.replay_buffer.reanalyse.num_workers > 0`, the trainer spins up a pool of `Reanalyser` Ray actors (`max_concurrency=1`) that re-run MCTS on positions already in the buffer with the current network. Each actor exposes a single `process(request: ReanalyseRequest) -> ReanalyseResult` method that runs `Explorer.run_mcts` against `request.entry.game_snapshot`, computes `policy = policy_from_root_visits(root, num_actions)` and `value = root.value()`, and returns a `ReanalyseResult`. The trainer dispatches work via `ray.util.ActorPool(self._reanalysers)` — no `ray.util.queue.Queue` in the loop, no `_QueueActor` middleman re-pickling buffer entries.
+
+At the start of each training step, `AlphaZoo._run_reanalyse`:
+1. Drains any ready results from the actor pool (`drain_actor_pool_results(self._reanalyse_pool)`) and applies each via `ReplayBuffer.apply_reanalyse_result`.
+2. If `len(buffer) / window_size >= min_buffer_fill_ratio`, calls `ReplayBuffer.pop_oldest(positions_per_step)` and submits each popped entry to the pool via `pool.submit(lambda actor, req: actor.process.remote(req), request)`.
+
+Popped entries are held out of the buffer while in flight — they cannot be sampled, evicted, or merged into by self-play. `apply_reanalyse_result` builds a "reanalysed" `BufferEntry` (count += 1, value running-mean-update with the MCTS value, policy replaced by the MCTS policy) and hands it to `ReplayBuffer._add_to_buffer`, which either re-inserts (if the key is no longer present) or count-weighted-merges with the current entry (if self-play has re-added the same state during the round-trip).
+
+`reanalyse.search` is a `SearchConfig` whose default at yaml-load time is `OmegaConf.merge` of the top-level `search` block with any overrides specified under `reanalyse.search` — overrides win at every leaf. This lets reanalyse use a different MCTS budget (typically larger) without duplicating the rest of the search config.
+
+`PettingZooWrapper.serialize` / `deserialize` (both `@staticmethod`) walk the env-wrapper chain layer-by-layer, dumping each layer's `(type, attrs)` plus the outer wrapper class to a plain dict and rebuilding the chain via `object.__new__`. This bypasses `EzPickle`'s `__getstate__` (which would otherwise discard the env's live runtime state on round-trip) so a buffer entry's snapshot can be shipped to a reanalyser and resume from the exact same position. Ray is told to use these via `ray.util.register_serializer(type(self.game), ...)` (the registrar is built by `game_serializer_register_fn_provider` and called in driver + each actor's `__init__`).
+
+`policy_from_root_visits` (in `training/targets.py`) builds the visit-count-derived policy distribution from a search root; used by both `GameRecord.store_visit_counts` and `Reanalyser.process`.
 
 ### Distributed Architecture
 
 Ray actors for parallelism:
-- `Gamer` (`training/gamer.py`): each Gamer is a Ray actor that plays games using MCTS. Holds one or more `IInferenceClient` handles for neural network evaluations. Supports `play_games(n)` for sequential mode and `play_forever()`/`stop()` for async mode.
+- `Gamer` (`training/gamer.py`): each Gamer is a Ray actor that plays games using MCTS. Holds one or more `IInferenceClient` handles for neural network evaluations. `play_games(n) -> list[GameRecord]` returns records directly (used in sequential mode via `ActorPool`); `play_forever()` pushes records to an internal queue drained via `get_completed_games()` (used in async mode); `stop()` halts the async loop. Takes a `reanalyse_enabled` flag which it forwards to `GameRecord` to control snapshot capture.
+- `Reanalyser` (`training/reanalyser.py`): each Reanalyser is a stateless Ray actor (`max_concurrency=1`) exposing `process(request) -> ReanalyseResult`. The trainer dispatches via `ActorPool`; no per-actor queues. Holds its own `IInferenceClient` slots — provisioned alongside the gamer slots when `IpcInferenceServer` is initialized.
 - `ReplayBuffer`: shared training data store.
 
 ### Inference (`inference/`)

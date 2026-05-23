@@ -95,3 +95,19 @@ def test_connect_four_async() -> None:
     )
 
     trainer.train()
+
+
+def test_connect_four_reanalyse_seq() -> None:
+    config_path = os.path.join(
+        os.path.dirname(__file__), "configs", "connect_four_reanalyse_seq_test.yaml"
+    )
+    config = AlphaZooConfig.from_yaml(config_path)
+    model = ConnectFourNet()
+
+    trainer = AlphaZoo(
+        env=connect_four_v3.env(),
+        config=config,
+        model=model,
+    )
+
+    trainer.train()

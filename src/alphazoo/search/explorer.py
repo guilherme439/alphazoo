@@ -286,11 +286,7 @@ class Explorer:
                 if epsilon_softmax < softmax_threshold:
                     action_i = self._softmax_action(visit_counts)
                 elif epsilon_random < random_threshold:
-                    obs = game.observe()
-                    valid_actions_mask = game.action_mask(obs).flatten()
-                    n_valids = np.sum(valid_actions_mask)
-                    probs = valid_actions_mask / n_valids
-                    action_i = int(self.rng.choice(game.get_action_size(), p=probs))
+                    action_i = int(self.rng.choice(list(node.children().keys())))
                 else:
                     action_i = self._max_action(visit_counts)
         else:

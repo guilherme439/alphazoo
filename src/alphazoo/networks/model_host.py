@@ -21,19 +21,22 @@ class ModelHost:
                 "model must be an instance of AlphaZooNet or AlphaZooRecurrentNet. "
                 "See the interfaces for the available classes in alphazoo.networks."
             )
-        self.device: str = device or self._auto_device()
-        self.model: AlphaZooNet | AlphaZooRecurrentNet = model.to(self.device)
+        self._device: str = device or self._auto_device()
+        self.model: AlphaZooNet | AlphaZooRecurrentNet = model.to(self._device)
         self._training = training
         if training:
             self.model.train()
         else:
             self.model.eval()
 
+    def device(self) -> str:
+        return self._device
+    
     def is_recurrent(self) -> bool:
         return isinstance(self.model, AlphaZooRecurrentNet)
 
     def forward(self, state: Tensor) -> tuple[Tensor, Tensor]:
-        state = state.to(self.device)
+        state = state.to(self._device)
         if self._training:
             return self.model(state)
         with torch.no_grad():
@@ -45,7 +48,7 @@ class ModelHost:
         iters_to_do: int,
         interim_thought: Optional[Tensor] = None,
     ) -> tuple[tuple[Tensor, Tensor], Tensor]:
-        state = state.to(self.device)
+        state = state.to(self._device)
         if self._training:
             return self.model(state, iters_to_do, interim_thought)  # type: ignore[call-arg]
         with torch.no_grad():

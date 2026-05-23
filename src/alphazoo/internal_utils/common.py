@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable
+from typing import Any, Callable
 
+import ray
+from ray.util import ActorPool
 import torch
 from torch import Tensor, nn
 from torch.optim import SGD, Adam, Optimizer
 from torch.optim.lr_scheduler import LRScheduler, MultiStepLR
 
+from ..ialphazoo_game import IAlphazooGame
 from ..inference.caches.keyless_cache import KeylessCache
+from ..inference.ipc import IpcInferenceClient
 from .loss_functions import AbsoluteError, KLDivergence, MSError, SquaredError
 
 LossFunction = Callable[[Tensor, Tensor], Tensor]
@@ -84,3 +88,56 @@ def sync_optimizer_lr(optimizer: Optimizer, scheduler: LRScheduler) -> None:
 
 def check_interval(step: int, interval: int) -> bool:
     return interval > 0 and step > 0 and step % interval == 0
+
+
+def game_serializer_register_fn_provider(
+    game_class: type[IAlphazooGame],
+) -> Callable[[], None]:
+    """
+    Return a function that registers ``game_class.serialize`` and ``game_class.deserialize``
+    as the functions Ray should use to (de)serialize games.
+    Must be called in every actor process that pickles or unpickles instances of ``game_class``.
+    """
+    def register() -> None:
+        ray.util.register_serializer(
+            game_class,
+            serializer=lambda game: game_class.serialize(game),
+            deserializer=lambda data: game_class.deserialize(data),
+        )
+    return register
+
+
+def distribute_clients(
+    inference_clients: list[IpcInferenceClient],
+    num_gamers: int,
+    threads_per_gamer: int,
+    num_reanalysers: int,
+    threads_per_reanalyser: int,
+) -> tuple[list[list[IpcInferenceClient]], list[list[IpcInferenceClient]]]:
+    gamer_clients: list[list[IpcInferenceClient]] = []
+    for i in range(num_gamers):
+        start = i * threads_per_gamer
+        gamer_clients.append(inference_clients[start : start + threads_per_gamer])
+
+    offset = num_gamers * threads_per_gamer
+    reanalyser_clients: list[list[IpcInferenceClient]] = []
+    for i in range(num_reanalysers):
+        start = offset + i * threads_per_reanalyser
+        reanalyser_clients.append(inference_clients[start : start + threads_per_reanalyser])
+
+    return gamer_clients, reanalyser_clients
+
+
+def drain_actor_pool_results(actor_pool: ActorPool, block: bool = False) -> list[Any]:
+    results = []
+    if block:
+        while actor_pool.has_next():
+            results.append(actor_pool.get_next_unordered())
+    else:
+        while True:
+            try:
+                results.append(actor_pool.get_next_unordered(timeout=0))
+            except (TimeoutError, StopIteration):
+                break
+
+    return results

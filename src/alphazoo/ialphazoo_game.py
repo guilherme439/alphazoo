@@ -12,15 +12,15 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 import numpy as np
+import ray.cloudpickle as cloudpickle
 import torch
 
 
 class IAlphazooGame(ABC):
     """
-    Game interface that AlphaZoo expects.
+    Game interface that AlphaZoo requires.
 
-    All methods below must be implemented. For PettingZoo environments the
-    concrete `PettingZooWrapper` class provides a default implementation.
+   `PettingZooWrapper` converts pettingZoo's envs into this interface.
     """
 
     # ------------------------------------------------------------------
@@ -71,10 +71,8 @@ class IAlphazooGame(ABC):
         """
         Return final game value.
 
-        If this value is player-dependent or not, should depend on
-        the `player_dependent_value` config.
-        In PettingZoo games this value is usually player dependent,
-        this is, from the perspective of the current player.
+        If this value is player-dependent or not, should depend on the `player_dependent_value` config.
+        In PettingZoo games this value is usually player dependent, this is, from the perspective of the current player.
 
         Only meaningful after `is_terminal()` returns True.
         """
@@ -139,3 +137,28 @@ class IAlphazooGame(ABC):
     def get_state_size(self) -> int:
         """Return the total number of elements in the flattened state tensor."""
         ...
+
+    # ------------------------------------------------------------------
+    # Default methods (overloadable)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def serialize(game: "IAlphazooGame") -> bytes:
+        """
+        Return a byte representation of the full game state.
+
+        Used to ship a game snapshot across process boundaries.
+        The returned bytes must round-trip through ``deserialize`` to a fully independent game in the same state.
+
+        Required for reanalyse.
+        """
+        return cloudpickle.dumps(game)
+
+    @staticmethod
+    def deserialize(data: bytes) -> "IAlphazooGame":
+        """
+        Reconstruct a game from bytes produced by ``serialize``.
+
+        Required for reanalyse.
+        """
+        return cloudpickle.loads(data)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Optional
+from queue import Empty, Queue
+from typing import TYPE_CHECKING, Callable, Optional
 
 import ray
 
@@ -21,21 +22,25 @@ class Gamer:
 
     def __init__(
         self,
-        record_queue: Any,
         game: IAlphazooGame,
         search_config: SearchConfig,
         recurrent_iterations: int,
         player_dependent_value: bool,
         inference_clients: list[IpcInferenceClient],
         profiler: Profiler | None = None,
+        reanalyse_enabled: bool = False,
+        register_serializer_fn: Optional[Callable[[], None]] = None,
     ) -> None:
-        self.record_queue = record_queue
+        if reanalyse_enabled:
+            register_serializer_fn()
+
         self.game = game
         self.search_config = search_config
         self.recurrent_iterations = recurrent_iterations
         self.player_dependent_value = player_dependent_value
         self.inference_clients = inference_clients
         self.profiler = profiler
+        self.reanalyse_enabled = reanalyse_enabled
 
         for client in self.inference_clients:
             client.connect()
@@ -48,18 +53,21 @@ class Gamer:
         )
         self.metrics_recorder = MetricsRecorder()
 
+        self._completed: Queue[GameRecord] = Queue()
         self._stopped = False
 
-    def play_games(self, num_games: int) -> None:
+    def play_games(self, num_games: int) -> list[GameRecord]:
         if self.profiler:
             self.profiler.start()
 
+        records: list[GameRecord] = []
         for _ in range(num_games):
-            record = self._play_game()
-            self.record_queue.put(record)
+            records.append(self._play_game())
 
         if self.profiler:
             self.profiler.accumulate(self.profiler.stop())
+
+        return records
 
     def play_forever(self) -> None:
         if self.profiler:
@@ -67,10 +75,19 @@ class Gamer:
 
         while not self._stopped:
             record = self._play_game()
-            self.record_queue.put(record)
+            self._completed.put(record)
 
         if self.profiler:
             self.profiler.accumulate(self.profiler.stop())
+
+    def get_completed_games(self) -> list[GameRecord]:
+        records: list[GameRecord] = []
+        while True:
+            try:
+                records.append(self._completed.get_nowait())
+            except Empty:
+                break
+        return records
 
     def stop(self) -> None:
         self._stopped = True
@@ -96,13 +113,15 @@ class Gamer:
         keep_subtree: bool = simulation_config.keep_subtree
 
         root_node = Node(0)
-        record = GameRecord(num_actions, self.player_dependent_value)
+        record = GameRecord(
+            num_actions,
+            self.player_dependent_value,
+            store_games=self.reanalyse_enabled,
+        )
 
         move_count = 0
         while not game.is_terminal():
-            obs = game.observe()
-            state = game.obs_to_state(obs, None)
-            record.store_step(state, game.get_current_player())
+            record.store_step(game)
 
             action_i, chosen_child = self.explorer.run_mcts(
                 game, self.inference_clients, root_node, self.recurrent_iterations

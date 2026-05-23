@@ -253,12 +253,12 @@ class NetworkTrainer:
         value_loss_function: LossFunction,
         normalize_policy: bool,
     ) -> tuple[Tensor, Tensor, Tensor]:
-        target_values, target_policies = list(zip(*targets))
+        target_values, target_policies = zip(*targets)
         predicted_policies, predicted_values = outputs
-        device = self.model_host.device
+        device = self.model_host.device()
 
-        target_policies_t = torch.stack([torch.tensor(p, dtype=torch.float32) for p in target_policies]).to(device)
-        target_values_t = torch.tensor(list(target_values), dtype=torch.float32).to(device)
+        target_policies_t = torch.stack(target_policies).to(device)
+        target_values_t = torch.tensor(target_values, dtype=torch.float32).to(device)
 
         predicted_policies_flat = predicted_policies.view(batch_size, -1)
         predicted_values_flat = predicted_values.reshape(-1)
