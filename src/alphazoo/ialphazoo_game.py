@@ -38,22 +38,13 @@ class IAlphazooGame(ABC):
         ...
 
     @abstractmethod
-    def shallow_clone(self) -> "IAlphazooGame":
+    def clone(self) -> "IAlphazooGame":
         """
-        Return a lightweight copy of the current game state.
+        Return a fully independent copy of the current game state.
 
         Used by MCTS to explore hypothetical moves without modifying the
-        original game. The clone must be fully independent.
-        """
-        ...
-
-    @abstractmethod
-    def copy_state_from(self, source: "IAlphazooGame") -> None:
-        """
-        Copy the full game state from source into this object.
-
-        Used to reset a reusable scratch game to a given state without
-        allocating new objects.
+        original game. Mutating the clone (or any object it owns) must not
+        affect the original, and vice versa.
         """
         ...
 
@@ -71,7 +62,7 @@ class IAlphazooGame(ABC):
         """
         Return final game value.
 
-        If this value is player-dependent or not, should depend on the `player_dependent_value` config.
+        If this value is player-dependent or not, should match the `player_dependent_value` config.
         In PettingZoo games this value is usually player dependent, this is, from the perspective of the current player.
 
         Only meaningful after `is_terminal()` returns True.
@@ -100,7 +91,7 @@ class IAlphazooGame(ABC):
 
     @abstractmethod
     def observe(self) -> dict:
-        """Return the raw PettingZoo observation dict for the current player."""
+        """Return a PettingZoo-like observation dict for the current player."""
         ...
 
     @abstractmethod

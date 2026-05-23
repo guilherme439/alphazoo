@@ -5,7 +5,7 @@ This wrapper bridges the gap between PettingZoo's AECEnv interface and
 the interface expected by the AlphaZero algorithm.
 """
 
-from copy import deepcopy
+import copy
 from typing import Any
 
 import numpy as np
@@ -33,6 +33,7 @@ class PettingZooWrapper(IAlphazooGame):
              When the two formats differ, obs_to_state transposes automatically.
         reset_env: Whether to reset ``env`` during construction. Pass False to
              attach the wrapper to an env whose current state must be preserved.
+
     """
 
     def __init__(
@@ -53,6 +54,14 @@ class PettingZooWrapper(IAlphazooGame):
         self._action_shape, self._num_actions = self._compute_action_info()
         self._state_shape, self._state_size = self._compute_state_info()
 
+    @staticmethod
+    def serialize(game: "PettingZooWrapper") -> bytes:
+        return cloudpickle.dumps(game)
+
+    @staticmethod
+    def deserialize(data: bytes) -> "PettingZooWrapper":
+        return cloudpickle.loads(data)
+
     def reset(self, *args, **kwargs) -> None:
         self.env.reset(*args, **kwargs)
         self._step_count = 0
@@ -61,77 +70,8 @@ class PettingZooWrapper(IAlphazooGame):
         self.env.step(action, *args, **kwargs)
         self._step_count += 1
 
-    def shallow_clone(self) -> "PettingZooWrapper":
-        """
-        Return a lightweight copy of the current game state for MCTS.
-
-        Uses `type(self)` so that subclass instances clone into the same
-        subclass, preserving any extra attributes (e.g. custom transforms).
-        """
-        clone = object.__new__(type(self))
-        for key, val in self.__dict__.items():
-            if key == 'env':
-                continue
-            setattr(clone, key, val)
-        clone.env = self._clone_pettingzoo_env(self.env)
-        return clone
-    
-    def copy_state_from(self, source: "PettingZooWrapper") -> None:
-        for key, val in source.__dict__.items():
-            if key == 'env':
-                continue
-            setattr(self, key, val)
-
-        src_layer = source.env
-        dst_layer = self.env
-        while True:
-            for attr_name, attr_value in vars(src_layer).items():
-                if attr_name == 'env':
-                    continue
-                setattr(dst_layer, attr_name, self._copy_attr(attr_value))
-            if not hasattr(src_layer, 'env'):
-                break
-            src_layer = src_layer.env
-            dst_layer = dst_layer.env
-
-    @staticmethod
-    def serialize(game: "PettingZooWrapper") -> bytes:
-        # Extract each env layer's (class, attrs) into a plain dict so pickle
-        # never invokes any layer's __getstate__. gymnasium's EzPickle base
-        # overrides __getstate__ to discard runtime state on round-trip.
-        wrapper_attrs = {k: v for k, v in game.__dict__.items() if k != 'env'}
-        env_layers: list[tuple[type, dict]] = []
-        layer = game.env
-        while True:
-            attrs = {k: v for k, v in vars(layer).items() if k != 'env'}
-            env_layers.append((type(layer), attrs))
-            if not hasattr(layer, 'env'):
-                break
-            layer = layer.env
-        return cloudpickle.dumps({
-            'wrapper_class': type(game),
-            'wrapper': wrapper_attrs,
-            'env_layers': env_layers,
-        })
-
-    @staticmethod
-    def deserialize(data: bytes) -> "PettingZooWrapper":
-        # Rebuild each env layer via object.__new__ to skip __init__ (which
-        # would reset the env) and link them inside-out into a layer chain.
-        payload = cloudpickle.loads(data)
-        obj = object.__new__(payload['wrapper_class'])
-        obj.__dict__.update(payload['wrapper'])
-
-        prev: Any = None
-        for layer_type, attrs in reversed(payload['env_layers']):
-            layer = object.__new__(layer_type)
-            for attr_name, attr_value in attrs.items():
-                setattr(layer, attr_name, attr_value)
-            if prev is not None:
-                layer.env = prev
-            prev = layer
-        obj.env = prev
-        return obj
+    def clone(self) -> "PettingZooWrapper":
+        return copy.deepcopy(self)
 
 
     # ------------------------------------------------------------------
@@ -146,7 +86,8 @@ class PettingZooWrapper(IAlphazooGame):
         return float(self.env.rewards[current_agent])
 
     def get_current_player(self) -> int:
-        return self._extract_player(self.env.agent_selection)
+        current_agent = self.env.agent_selection
+        return self.env.possible_agents.index(current_agent) + 1
 
     def get_length(self) -> int:
         return self._step_count
@@ -191,8 +132,6 @@ class PettingZooWrapper(IAlphazooGame):
     def get_state_size(self) -> int:
         return self._state_size
 
-    
-
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
@@ -213,43 +152,111 @@ class PettingZooWrapper(IAlphazooGame):
         if hasattr(obs_space, 'spaces') and 'observation' in obs_space.spaces:
             return obs_space.spaces['observation'].dtype == np.float32
         return obs_space.dtype == np.float32
+    
+    
+    # ------------------------------------------------------------------
+    #                             🔥 HELL 🔥                            
+    # ------------------------------------------------------------------
 
-    def _extract_player(self, agent: Any) -> int:
-        """Returns 1-indexed (1, 2) based on agent position in possible_agents,
-        to match AlphaZero's convention where player 2's values are negated
-        in the UCT score."""
-        return self.env.possible_agents.index(agent) + 1
+    """
+    Welcome to hell.
+    Yes this code is ugly. Some genius at openAI once decided the make
+    all envs extend from EzPickle. EzPickle makes it so that state is not
+    preserved when copying/pickling enviorments because it overrides
+    __setstate__ and __getstate__. I have tried everything I could think of
+    to get around the problem and nothing worked other than this.
+    The magnificent Thor hammer below was the code Claude wrote to get around the problem.
+    I do not understand it. I don't want to understand it. I'm tired.
+    It seems to work. Claude says it works almost everytime. He left a note for you to read.
 
+    Note on state preservation across copy/pickle:
+        ``__getstate__`` / ``__setstate__`` decompose the env layer chain into
+        ``(class, attrs)`` specs and rebuild it via ``object.__new__``. This
+        bypasses ``gymnasium.utils.EzPickle``'s destructive ``__setstate__``,
+        so ``copy.deepcopy(wrapper)`` and ``cloudpickle.dumps(wrapper)`` both
+        preserve runtime state. The one case this does not handle is an
+        EzPickle env stored as a *value* in another layer's ``__dict__``;
+        standard PettingZoo envs do not have this structure.
 
-    def _clone_pettingzoo_env(self, original_env: Any) -> Any:
+                                                                                                      
+                                                        ████████                                  
+                                                      ▒▒▒▒▒▒██▒▒▒▒                                
+                                                    ▓▓░░▒▒▓▓  ░░▒▒██                              
+                                                  ██░░▒▒▓▓▒▒▓▓  ░░▒▒██                            
+                                                ██░░▒▒▓▓▒▒▒▒▒▒▓▓  ░░▒▒██                          
+                                              ██░░▒▒▓▓▒▒▒▒░░░░▒▒▓▓  ░░▒▒▓▓      ██████            
+                                            ▓▓░░▒▒▓▓▒▒▒▒░░░░░░░░▒▒▓▓  ░░▒▒▓▓  ▓▓░░▓▓▓▓▓▓          
+                                            ▓▓▒▒▓▓▒▒▒▒▒▒░░░░░░░░░░░░▓▓  ░░▒▒▓▓░░░░░░▓▓██          
+                                            ▓▓▓▓▓▓▒▒░░  ▒▒░░░░░░  ░░▒▒▓▓  ░░▒▒▓▓░░▒▒▒▒██          
+                                            ▓▓▓▓▓▓▓▓▒▒░░  ▒▒░░░░░░  ░░▒▒▒▒  ░░▒▒▓▓▒▒▓▓░░          
+                                              ██▓▓▓▓▓▓▒▒▒▒  ▒▒░░░░░░  ░░▒▒▒▒  ░░▒▒▓▓              
+                                                ██▓▓▓▓▓▓▒▒▒▒  ▒▒░░░░░░  ░░▒▒▒▒  ░░▒▒██            
+                                                  ██▓▓▓▓▓▓▒▒▒▒  ▒▒░░░░░░  ░░▒▒▓▓  ░░▒▒██          
+                                                    ▓▓▓▓▓▓▓▓▒▒▒▒▒▒▒▒░░░░░░░░░░▒▒▓▓  ░░▒▒██        
+                                                      ▓▓▓▓▓▓▓▓▒▒▒▒▒▒▒▒░░░░░░░░░░▒▒▓▓  ░░▒▒██      
+                                                        ▓▓▓▓▓▓▓▓▒▒▒▒  ▒▒░░░░░░  ░░▒▒▓▓  ░░▒▒██    
+                                                          ▓▓▓▓▓▓▓▓▒▒▒▒  ▒▒░░░░░░  ░░▒▒▓▓  ░░▒▒██  
+                                                        ▓▓░░▓▓▓▓▓▓▓▓▒▒▒▒  ▒▒░░░░░░░░░░▒▒▓▓  ▓▓▓▓██
+                                                      ▓▓░░░░░░▓▓▓▓▓▓▓▓▒▒░░  ▒▒░░░░░░  ▒▒▒▒▓▓  ████
+                                                    ▓▓░░░░░░▒▒▒▒▓▓▓▓▓▓▓▓▒▒░░  ▒▒░░  ▒▒▒▒▓▓▓▓▓▓░░██
+                                                  ██░░░░░░▒▒▒▒██  ██▓▓▓▓▒▒▒▒▒▒▒▒▒▒▒▒▒▒▓▓▓▓██░░▒▒██
+                                                ██  ░░░░▒▒▒▒██      ██▓▓▓▓▓▓▒▒░░  ▒▒▓▓▓▓██░░▒▒██  
+                                              ██░░░░░░▒▒▒▒██          ██▓▓▓▓▓▓▒▒▒▒▓▓▓▓██░░▒▒██    
+                                            ██  ░░░░▒▒▒▒▓▓              ▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░▒▒██      
+                                          ██  ░░░░▒▒▒▒▓▓                ░░▓▓▓▓▓▓▓▓▓▓░░▒▒██        
+                                        ██  ░░░░▒▒▒▒▓▓                    ░░▓▓▓▓▓▓░░▒▒██          
+                                      ██  ░░░░▒▒▒▒██                        ░░██▓▓██▓▓            
+                                    ▓▓  ░░░░▒▒▒▒██                                                
+                                  ██  ░░░░▒▒▒▒██                                                  
+                                ▓▓  ░░░░▒▒▒▒██                                                    
+                              ▓▓  ░░░░▒▒▒▒██                                                      
+                          ░░▓▓░░░░░░▒▒▒▒██                                                        
+                        ░░▓▓░░░░░░▒▒▒▒▓▓                                                          
+                      ░░▒▒░░░░░░▒▒▒▒▓▓                                                            
+                      ▒▒░░░░░░▒▒▒▒▓▓                                                              
+                    ██░░░░░░▒▒▒▒▓▓                                                                
+                  ██  ░░░░▒▒▒▒▓▓                                                                  
+                ██  ░░░░▒▒▒▒▓▓                                                                    
+              ██  ░░░░▒▒▒▒▓▓                                                                      
+            ▓▓  ░░░░▒▒▒▒▓▓                                                                        
+          ██  ░░░░▒▒▒▒▒▒                                                                          
+        ▓▓░░░░░░▒▒▒▒██                                                                            
+    ████▓▓▓▓░░▒▒▒▒██                                                                              
+  ██▒▒  ▒▒▓▓▓▓▒▒██                                                                                
+  ▓▓▒▒  ▒▒▒▒▓▓██                                                                                  
+  ▓▓▒▒▒▒▒▒▓▓██                                                                                    
+  ██▓▓▓▓▓▓▓▓██                                                                                    
+  ░░▓▓▓▓▓▓▓▓░░                                                                                    
+
+    """
+    def __getstate__(self) -> list[tuple[type, dict]]:
+        return [
+            (type(layer), {k: v for k, v in vars(layer).items() if k != 'env'})
+            for layer in self._walk_layer_chain(self)
+        ]
+
+    def __setstate__(self, specs: list[tuple[type, dict]]) -> None:
+        rebuilt = self._rebuild_layer_chain(specs)
+        self.__dict__.update(rebuilt.__dict__)
+
+    
+    def _walk_layer_chain(self, root: Any) -> list[Any]:
         layers = []
-        layer = original_env
+        cur = root
         while True:
-            layers.append(layer)
-            if not hasattr(layer, 'env'):
+            layers.append(cur)
+            if not hasattr(cur, 'env'):
                 break
-            layer = layer.env
+            cur = cur.env
+        return layers
 
-        prev_clone = None
-        for original_layer in reversed(layers):
-            clone_layer = object.__new__(type(original_layer))
-            for attr_name, attr_value in vars(original_layer).items():
-                if attr_name == 'env':
-                    continue
-                setattr(clone_layer, attr_name, self._copy_attr(attr_value))
-            if prev_clone is not None:
-                clone_layer.env = prev_clone
-            prev_clone = clone_layer
-
-        return prev_clone
-
-    def _copy_attr(self, value: Any) -> Any:
-        if isinstance(value, (str, int, float, bool, type(None), tuple)):
-            return value
-        if isinstance(value, dict):
-            return value.copy()
-        if isinstance(value, list):
-            return value.copy()
-        if isinstance(value, np.ndarray):
-            return value.copy()
-        return deepcopy(value)
+    def _rebuild_layer_chain(self, specs: list[tuple[type, dict]]) -> Any:
+        prev: Any = None
+        for layer_type, attrs in reversed(specs):
+            layer = object.__new__(layer_type)
+            for attr_name, attr_value in attrs.items():
+                setattr(layer, attr_name, attr_value)
+            if prev is not None:
+                layer.env = prev
+            prev = layer
+        return prev

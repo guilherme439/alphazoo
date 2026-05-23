@@ -143,7 +143,7 @@ class TestConnectFourClone:
         game.step(2)
         game.step(3)
 
-        clone = game.shallow_clone()
+        clone = game.clone()
 
         assert clone.get_current_player() == game.get_current_player()
         assert clone.get_length() == game.get_length()
@@ -160,7 +160,7 @@ class TestConnectFourClone:
         game = make_game()
         game.step(3)
 
-        clone = game.shallow_clone()
+        clone = game.clone()
         clone.step(0)
 
         assert game.get_length() == 1

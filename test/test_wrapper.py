@@ -242,21 +242,21 @@ class TestClone:
     def test_clone_preserves_player(self):
         game = make_connect_four()
         game.step(3)
-        clone = game.shallow_clone()
+        clone = game.clone()
         assert clone.get_current_player() == game.get_current_player()
 
     def test_clone_preserves_length(self):
         game = make_connect_four()
         game.step(3)
         game.step(2)
-        clone = game.shallow_clone()
+        clone = game.clone()
         assert clone.get_length() == game.get_length()
 
     def test_clone_preserves_terminal_state(self):
         game = make_tictactoe()
         for action in [0, 3, 1, 4, 2]:
             game.step(action)
-        clone = game.shallow_clone()
+        clone = game.clone()
         assert clone.is_terminal()
         assert clone.get_terminal_value() == game.get_terminal_value()
 
@@ -264,7 +264,7 @@ class TestClone:
         game = make_connect_four()
         game.step(3)
         game.step(2)
-        clone = game.shallow_clone()
+        clone = game.clone()
         obs_game = game.observe()
         obs_clone = clone.observe()
         np.testing.assert_array_equal(obs_game["observation"], obs_clone["observation"])
@@ -273,7 +273,7 @@ class TestClone:
     def test_clone_is_independent(self):
         game = make_connect_four()
         game.step(3)
-        clone = game.shallow_clone()
+        clone = game.clone()
         clone.step(0)
         assert game.get_length() == 1
         assert clone.get_length() == 2

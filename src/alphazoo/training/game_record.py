@@ -31,7 +31,7 @@ class GameRecord:
         self._states.append(game.obs_to_state(obs, None))
         self._players.append(game.get_current_player())
         if self._store_games:
-            self._games.append(game.shallow_clone())
+            self._games.append(game.clone())
 
     def store_visit_counts(self, root_node: Any) -> None:
         self._policies.append(policy_from_root_visits(root_node, self.num_actions))

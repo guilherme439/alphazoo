@@ -46,7 +46,7 @@ Two execution modes:
 
 `IAlphazooGame` ABC defines the game interface AlphaZoo needs:
 - `reset()`, `step()`, `observe()`, `obs_to_state()`, `action_mask()`
-- `is_terminal()`, `get_terminal_value()`, `shallow_clone()`, `copy_state_from()`
+- `is_terminal()`, `get_terminal_value()`, `clone()`
 - `get_action_shape()`, `get_action_size()`, `get_state_shape()`, `get_state_size()`, `get_length()`
 - `serialize(game) -> bytes` and `deserialize(data) -> IAlphazooGame` (both `@staticmethod`; concrete defaults using `cloudpickle.dumps` / `cloudpickle.loads`; overridable for games whose state does not survive a cloudpickle round-trip). Called only by the reanalyse path.
 
@@ -54,7 +54,7 @@ Two execution modes:
 
 ### Self-Play Records (`training/game_record.py`, `training/replay_buffer.py`)
 
-`GameRecord` stores per-game trajectories: internal arrays `_states`, `_players`, `_policies`, and (when reanalyse is enabled) `_games` carrying `shallow_clone()` snapshots of the game taken before each MCTS run. The public surface is `store_step(game)`, `store_visit_counts(root_node)`, `set_terminal_value(value)`, `make_target(i)`, `get_state(i)`, `get_game(i)`, and `__len__`. `store_step` takes the live game and clones internally only when `store_games=True` was passed at construction.
+`GameRecord` stores per-game trajectories: internal arrays `_states`, `_players`, `_policies`, and (when reanalyse is enabled) `_games` carrying `clone()` snapshots of the game taken before each MCTS run. The public surface is `store_step(game)`, `store_visit_counts(root_node)`, `set_terminal_value(value)`, `make_target(i)`, `get_state(i)`, `get_game(i)`, and `__len__`. `store_step` takes the live game and clones internally only when `store_games=True` was passed at construction.
 
 `ReplayBuffer` accumulates positions locally in the trainer process and serves training batches. The buffer is keyed by a deterministic 64-bit `blake2b` hash of each state's raw bytes. When the same state is encountered again, its `value` and `policy` targets are updated via a running mean rather than appended as a separate entry, and the entry is moved to the end of the buffer's FIFO order — so frequently-seen positions (typically openings) keep their accumulated stats and don't age out. `window_size` caps the number of unique positions, not raw observations; eviction is LRU on the merged-or-inserted timestamp.
 

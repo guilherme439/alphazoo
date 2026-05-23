@@ -57,7 +57,6 @@ class Explorer:
             self.num_threads = 1
             self.virtual_loss = 0.0
         self._tree_lock: threading.Lock | None = None
-        self._scratch_games: list[IAlphazooGame] | None = None
         self._pool = ThreadPoolExecutor(max_workers=self.num_threads)
 
     def run_mcts(
@@ -72,16 +71,13 @@ class Explorer:
         if self.training:
             self._add_exploration_noise(root_node)
 
-        if self._scratch_games is None:
-            self._scratch_games = [game.shallow_clone() for _ in range(self.num_threads)]
-
         num_simulations: int = self.config.simulation.mcts_simulations
         simulation_counter = itertools.count() # thread safe counter
 
         futures = [
             self._pool.submit(
                 self._search_tree,
-                root_node, game, self._scratch_games[i],
+                root_node, game,
                 inference_clients[i], recurrent_iterations,
                 simulation_counter, num_simulations,
             )
@@ -97,25 +93,23 @@ class Explorer:
         self,
         root: Node,
         game: IAlphazooGame,
-        scratch_game: IAlphazooGame,
         inference_client: IInferenceClient,
         recurrent_iterations: int,
         simulation_counter: itertools.count,
         num_simulations: int,
     ) -> None:
         while next(simulation_counter) < num_simulations:
-            self._run_simulation(root, game, scratch_game, inference_client, recurrent_iterations)
+            self._run_simulation(root, game, inference_client, recurrent_iterations)
 
     def _run_simulation(
         self,
         root: Node,
         game: IAlphazooGame,
-        scratch_game: IAlphazooGame,
         inference_client: IInferenceClient,
         recurrent_iterations: int,
     ) -> None:
         node = root
-        scratch_game.copy_state_from(game)
+        scratch_game = game.clone()
         search_path: list[Node] = [node]
 
         while True:
@@ -176,13 +170,13 @@ class Explorer:
         return final_score
 
     def _calculate_exploration_bias(self, node: Node) -> float:
-        # Relative importance between value and prior as the game progresses
+        # relative importance between value and prior as the game progresses
         pb_c_base: float = self.config.uct.pb_c_base
         pb_c_init: float = self.config.uct.pb_c_init
         return math.log((node.visit_count() + pb_c_base + 1) / pb_c_base) + pb_c_init
 
     def _calculate_ucb_factor(self, parent: Node, child: Node) -> float:
-        # Relative importance amongst children based on their visit counts
+        # relative importance amongst children based on their visit counts
         return math.sqrt(parent.visit_count()) / (child.visit_count() + 1)
 
     def _expand_node(

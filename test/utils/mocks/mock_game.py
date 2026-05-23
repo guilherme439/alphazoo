@@ -30,15 +30,11 @@ class MockGame(IAlphazooGame):
         self._depth += 1
         self._player = 2 if self._player == 1 else 1
 
-    def shallow_clone(self):
+    def clone(self):
         clone = MockGame(self.num_actions, self.max_depth, self._action_mask)
         clone._depth = self._depth
         clone._player = self._player
         return clone
-
-    def copy_state_from(self, source):
-        self._depth = source._depth
-        self._player = source._player
 
     def is_terminal(self) -> bool:
         return self._depth >= self.max_depth
