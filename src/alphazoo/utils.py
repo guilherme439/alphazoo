@@ -14,7 +14,7 @@ from .search.mcts.node import Node
 from .wrappers.pettingzoo_wrapper import PettingZooWrapper
 
 
-def select_action_with_mcts_for(
+def select_action_with_alphazero_mcts(
     env: AECEnv,
     model: nn.Module,
     search_config: SearchConfig,
@@ -23,11 +23,11 @@ def select_action_with_mcts_for(
     recurrent_iterations: int = 1,
 ) -> int:
     """
-    One-shot MCTS entry point for external consumers.
+    One-shot network-guided MCTS entry point for external consumers.
 
     Wraps ``env`` as an ``IAlphazooGame``, builds a local inference client from
-    ``model``, runs a single MCTS search from a fresh root, and returns the
-    selected action.
+    ``model``, runs a single AlphaZero-style MCTS search from a fresh root, and
+    returns the selected action.
     """
     game = PettingZooWrapper(
         env,
@@ -46,6 +46,33 @@ def select_action_with_mcts_for(
     action, _ = explorer.run_alphazero_mcts(
         game=game,
         inference_clients=server.get_clients(),
+        root_node=root,
+    )
+    return action
+
+
+def select_action_with_traditional_mcts(
+    env: AECEnv,
+    search_config: SearchConfig,
+    obs_space_format: str,
+) -> int:
+    """
+    One-shot traditional MCTS entry point for external consumers.
+
+    Wraps ``env`` as an ``IAlphazooGame``, runs a single MCTS search with
+    uniform priors and random rollouts to terminal, and returns the selected
+    action.
+    """
+    game = PettingZooWrapper(
+        env,
+        observation_format=obs_space_format,
+        network_input_format="channels_first",
+        reset_env=False,
+    )
+    explorer = Explorer(search_config)
+    root = Node(prior=0.0)
+    action, _ = explorer.run_traditional_mcts(
+        game=game,
         root_node=root,
     )
     return action

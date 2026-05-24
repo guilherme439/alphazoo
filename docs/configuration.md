@@ -2,7 +2,7 @@
 
 All configuration is done through `AlphaZooConfig` and its nested dataclasses. Every field has a default value, so you only need to specify what you want to change.
 
-A complete example is available at [`configs/examples/connect_four.yaml`](../configs/examples/connect_four.yaml).
+A complete example is available at [`configs/examples/connect_four.yaml`](https://github.com/guilherme439/alphazoo/blob/master/src/alphazoo/configs/examples/connect_four.yaml).
 
 ## Quick Links
 

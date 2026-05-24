@@ -40,7 +40,8 @@ Two execution modes:
 - `MCTS` (`mcts/mcts.py`): abstract base holding the tree walk, PUCT scoring, virtual-loss bookkeeping, backprop, action selection, and root exploration noise. Subclasses implement `_expand_node(node, game) -> float`. `_run_search` takes `use_exploration_noise` and `use_action_exploration` flags so callers decide per run whether to perturb root priors and how to pick the final action.
 - `AlphazeroMCTS` (`mcts/alphazero_mcts.py`): `_expand_node` queries an `IInferenceClient` (one per search thread, bound via the pool's `initializer`) for the policy prior and value estimate at the leaf.
 - `TraditionalMCTS` (`mcts/traditional_mcts.py`): `_expand_node` installs uniform priors over legal actions and estimates the leaf's value with a random rollout to terminal.
-- `select_action_with_mcts_for(env, model, search_config, obs_space_format, is_recurrent, recurrent_iterations)` (`utils.py`): top-level one-shot helper for external consumers. Wraps a PettingZoo env, builds a `LpcInferenceServer` around `model` (in-process, no Ray), runs a fresh tree, returns the action.
+- `select_action_with_alphazero_mcts(env, model, search_config, obs_space_format, is_recurrent, recurrent_iterations)` (`utils.py`): top-level one-shot helper for external consumers. Wraps a PettingZoo env, builds a `LpcInferenceServer` around `model` (in-process, no Ray), runs a fresh network-guided tree, returns the action.
+- `select_action_with_traditional_mcts(env, search_config, obs_space_format)` (`utils.py`): top-level one-shot helper for external consumers. Wraps a PettingZoo env, runs a fresh tree with uniform priors and random rollouts, returns the action. No network involved.
 - `Node` (`mcts/node.py`): tree node with visit counts, values, children, priors
 - Action selection: softmax over visit counts early (exploration), argmax late (exploitation), with epsilon fallback
 - Dirichlet noise at root for training diversity (AlphaZero mode only)
