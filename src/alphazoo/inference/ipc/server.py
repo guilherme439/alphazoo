@@ -90,6 +90,9 @@ class IpcInferenceServer:
         dispatcher.join()
         self._cleanup()
 
+    def get_pid(self) -> int:
+        return os.getpid()
+
     def get_clients(self) -> list[IpcInferenceClient]:
         return self._clients
 

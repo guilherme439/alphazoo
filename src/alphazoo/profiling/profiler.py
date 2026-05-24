@@ -1,120 +1,216 @@
 from __future__ import annotations
 
+import json
+import logging
+import os
+import re
+import shutil
+import signal
+import subprocess
+from collections import defaultdict
 from typing import Optional
 
-import marshal
-import os
-import pstats
-from collections import defaultdict
+import ray
+from ray.actor import ActorHandle
 
-import yappi
+logger = logging.getLogger("alphazoo")
+
+_THREAD_NAME_RE = re.compile(r'^Thread \d+ "(.*)"$')
+_THREAD_FRAME_RE = re.compile(r'^thread \(\d+\)(.*)$')
 
 
 class Profiler:
-    """Lightweight profiling data collector and merger.
+    """Spawns and manages py-spy subprocesses attached to the main process and Ray actors.
 
-    Wraps yappi for wall-clock profiling. Converts and merges
-    profiling data entirely in memory (no temp files) using the
-    marshal-based pstat format.
+    Each target PID gets its own py-spy `record` subprocess that writes a speedscope JSON file into `output_dir`.
+    Subprocesses are stopped gracefully with SIGINT so py-spy flushes the captured profile to disk.
+
+    `finish()` stops every subprocess and then writes a per-category aggregate file
+    (`{category}_all.speedscope.json`) that groups thread profiles by their Python
+    thread name and sums samples across processes of the same category.
     """
 
-    class PStatHolder:
-        """Adapter so pstats.Stats can load from an in-memory dict.
-
-        pstats.Stats only accepts file paths or objects with a
-        ``create_stats()`` method and a ``.stats`` dict attribute.
-        This wrapper satisfies that protocol.
-        """
-
-        def __init__(self, stats_dict: dict) -> None:
-            self.stats = stats_dict
-
-        def create_stats(self) -> None:
-            pass
+    _SAMPLE_RATE_HZ = 100
+    _STOP_TIMEOUT_S = 30.0
+    _FAILURE_DETECT_S = 0.5
 
     def __init__(self, output_dir: str) -> None:
         self.output_dir = output_dir
-        self._accumulated: list[bytes] = []
+        self._processes: list[tuple[subprocess.Popen, str]] = []
+        self._category_files: dict[str, list[str]] = defaultdict(list)
+        os.makedirs(output_dir, exist_ok=True)
 
-    def start(self) -> None:
-        yappi.clear_stats()
-        yappi.set_clock_type("wall")
-        # profile_threads=true bugs snakeviz async mode profile visualization
-        yappi.start(profile_threads=False, builtins=True)
+    def start_main(self) -> None:
+        self._spawn("main", "main", os.getpid())
 
-    def stop(self) -> bytes:
-        """Stop yappi and return the current profile as marshaled pstat bytes."""
-        yappi.stop()
-        data = Profiler.yappi_stats_to_bytes(yappi.get_func_stats())
-        yappi.clear_stats()
-        return data
+    def attach(self, category: str, actors: list[ActorHandle]) -> None:
+        if not actors:
+            return
+        pids: list[int] = ray.get([actor.get_pid.remote() for actor in actors])
+        is_unique = (len(pids) == 1)
+        for i, pid in enumerate(pids):
+            name = category if is_unique else f"{category}_{i}"
+            self._spawn(category, name, pid)
 
-    def accumulate(self, data: bytes) -> None:
-        self._accumulated.append(data)
-
-    def get_accumulated(self) -> bytes:
-        """Get all accumulated data as a single marshaled pstat blob."""
-        return Profiler.merge(self._accumulated)
-
-    def save_data_to_file(self, stats: pstats.Stats, filename: str) -> str:
-        os.makedirs(self.output_dir, exist_ok=True)
-        path = os.path.join(self.output_dir, filename)
-        stats.dump_stats(path)
-        return path
+    def finish(self) -> None:
+        self._stop_all()
+        self._write_aggregate_results()
 
     def save_metrics_to_file(self, metrics: dict, running_mode: Optional[str] = None) -> str:
-        os.makedirs(self.output_dir, exist_ok=True)
         path = os.path.join(self.output_dir, "summary.txt")
-
         total_run_time = metrics.get("time/total", 0.0)
         with open(path, "w") as f:
             if running_mode:
                 f.write(f"Running mode: {running_mode}\n")
             f.write(f"Total run time: {total_run_time:.2f}s ({total_run_time / 60:.2f}m)\n")
-
         return path
 
-    # ------------------------------------------------------------------
-    # Static helpers
-    # ------------------------------------------------------------------
+    def _spawn(self, category: str, name: str, pid: int) -> None:
+        executable = shutil.which("py-spy")
+        if executable is None:
+            raise RuntimeError("py-spy not found on PATH. Install with `pip install py-spy`.")
 
-    @staticmethod
-    def merge(stats_list: list[bytes]) -> bytes:
-        """Merge multiple marshaled pstat byte blobs into single marshaled bytes."""
-        if not stats_list:
-            raise ValueError("stats_list must not be empty")
-        if len(stats_list) == 1:
-            return stats_list[0]
-        
-        merged = Profiler.bytes_to_pstats(stats_list[0])
-        for b in stats_list[1:]:
-            merged.add(Profiler.bytes_to_pstats(b))
-        return marshal.dumps(merged.stats)
+        output_path = os.path.join(self.output_dir, f"{name}.speedscope.json")
+        stderr_path = os.path.join(self.output_dir, f"{name}.py-spy.log")
 
-    @staticmethod
-    def bytes_to_pstats(data: bytes) -> pstats.Stats:
-        """Deserialize marshaled pstat bytes into a :pyclass:`pstats.Stats`."""
-        return pstats.Stats(Profiler.PStatHolder(marshal.loads(data)))
-    
-    @staticmethod
-    def yappi_stats_to_bytes(func_stats: yappi.YFuncStats) -> bytes:
-        """Convert yappi function stats to marshaled pstat-format bytes.
+        cmd = [
+            executable, "record",
+            "--pid", str(pid),
+            "--threads",
+            "--rate", str(self._SAMPLE_RATE_HZ),
+            "--format", "speedscope",
+            "--output", output_path,
+        ]
+        stderr_file = open(stderr_path, "w")
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=stderr_file)
+        finally:
+            stderr_file.close()
 
-        Builds the same dict structure that :pyfunc:`pstats.Stats.load_stats`
-        expects, but entirely in memory.
-        """
-        pdict: dict = {}
-        callers: dict = defaultdict(dict)
+        # detect errors early.
+        try:
+            rc = proc.wait(timeout=self._FAILURE_DETECT_S)
+        except subprocess.TimeoutExpired:
+            self._processes.append((proc, output_path))
+            self._category_files[category].append(output_path)
+            logger.info("Profiler: py-spy attached to %s with pid %d", name, pid)
+            return
 
-        for fs in func_stats:
-            for ct in fs.children:
-                callers[ct][(fs.module, fs.lineno, fs.name)] = (
-                    ct.ncall, ct.nactualcall, ct.tsub, ct.ttot,
+        with open(stderr_path) as f:
+            stderr_content = f.read().strip()
+        raise RuntimeError(
+            f"py-spy exited immediately (code {rc}) attaching to pid {pid}.\n"
+            f"stderr:\n{stderr_content}\n\n"
+            "On Linux, py-spy needs ptrace permissions:\n"
+            "  sudo setcap cap_sys_ptrace=eip $(readlink -f $(which py-spy))\n"
+            "  echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope"
+        )
+
+    def _stop_all(self) -> None:
+        for proc, _ in self._processes:
+            try:
+                proc.send_signal(signal.SIGINT)
+            except ProcessLookupError:
+                continue
+
+        for proc, output_path in self._processes:
+            try:
+                proc.wait(timeout=self._STOP_TIMEOUT_S)
+            except subprocess.TimeoutExpired:
+                logger.warning("py-spy did not exit within %.0fs, terminating: %s",
+                               self._STOP_TIMEOUT_S, output_path)
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5.0)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+            logger.info("py-spy output: %s", output_path)
+
+        self._processes.clear()
+
+    def _write_aggregate_results(self) -> None:
+        for category, paths in self._category_files.items():
+            if len(paths) <= 1:
+                continue
+
+            present = [p for p in paths if os.path.exists(p)]
+            if len(present) < 2:
+                logger.warning(
+                    "Skipping merge for %s: only %d of %d output files present",
+                    category, len(present), len(paths),
                 )
+                continue
+            
+            output_path = self._merge_into_aggregate(category, present)
+            logger.info("Profiler: aggregated %d files into %s", len(present), output_path)
 
-        for fs in func_stats:
-            pdict[(fs.module, fs.lineno, fs.name)] = (
-                fs.ncall, fs.nactualcall, fs.tsub, fs.ttot, callers[fs],
-            )
+    def _merge_into_aggregate(self, category: str, input_paths: list[str]) -> str:
+        docs = []
+        for path in input_paths:
+            with open(path) as f:
+                docs.append(json.load(f))
 
-        return marshal.dumps(pdict)
+        groups: dict[str, list[tuple[dict, dict]]] = defaultdict(list)
+        for doc in docs:
+            for profile in doc["profiles"]:
+                groups[self._parse_thread_name(profile["name"])].append((doc, profile))
+
+        merged_frames: list[dict] = []
+        frame_index: dict[tuple, int] = {}
+        merged_profiles: list[dict] = []
+        for thread_name, entries in sorted(groups.items()):
+            samples: list[list[int]] = []
+            weights: list[float] = []
+            for doc, profile in entries:
+                remap = [self._intern_frame(f, merged_frames, frame_index) for f in doc["shared"]["frames"]]
+                for stack in profile["samples"]:
+                    samples.append([remap[i] for i in stack])
+                weights.extend(profile["weights"])
+
+            display_name = thread_name if thread_name else "(unnamed)"
+            display_name = f"{display_name} (aggregated ×{len(entries)})"
+
+            merged_profiles.append({
+                "type": "sampled",
+                "name": display_name,
+                "unit": "seconds",
+                "startValue": 0.0,
+                "endValue": sum(weights),
+                "samples": samples,
+                "weights": weights,
+            })
+
+        output = {
+            "$schema": "https://www.speedscope.app/file-format-schema.json",
+            "shared": {"frames": merged_frames},
+            "profiles": merged_profiles,
+            "exporter": "alphazoo py-spy merger",
+            "name": f"{category} (aggregated)",
+            "activeProfileIndex": 0,
+        }
+
+        output_path = os.path.join(self.output_dir, f"{category}_all.speedscope.json")
+        with open(output_path, "w") as f:
+            json.dump(output, f)
+        return output_path
+
+    def _intern_frame(self, frame: dict, frames: list[dict], index: dict[tuple, int]) -> int:
+        frame = self._normalize_thread_frame(frame)
+        key = (frame.get("name"), frame.get("file"), frame.get("line"), frame.get("col"))
+        idx = index.get(key)
+        if idx is None:
+            idx = len(frames)
+            index[key] = idx
+            frames.append(frame)
+        return idx
+
+    def _normalize_thread_frame(self, frame: dict) -> dict:
+        match = _THREAD_FRAME_RE.match(frame.get("name", ""))
+        if match is None:
+            return frame
+        return {**frame, "name": "thread" + match.group(1)}
+
+    def _parse_thread_name(self, profile_name: str) -> str:
+        match = _THREAD_NAME_RE.match(profile_name)
+        return match.group(1) if match else profile_name

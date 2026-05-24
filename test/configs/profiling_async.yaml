@@ -15,8 +15,8 @@ data:
   player_dependent_value: true
 learning:
   replay_buffer:
-    window_size: 10000
-    leak_chance: 0.00001
+    window_size: 15000
+    leak_chance: 0.0001
     reanalyse:
       num_workers: 2
       positions_per_step: 16

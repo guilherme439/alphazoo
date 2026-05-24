@@ -162,6 +162,7 @@ class AlphaZoo:
 
     def train(self, on_step_end: Optional[StepCallback] = None) -> None:
         logger.setLevel(logging.INFO if self.config.verbose else logging.WARNING)
+        logger.info("\n")
 
         config = self.config
         self.current_step = self.starting_step
@@ -202,7 +203,7 @@ class AlphaZoo:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             self._profiling_dir = os.path.join("profiling", timestamp)
             profiler = Profiler(self._profiling_dir)
-            profiler.start()
+            profiler.start_main()
 
         # ---------------------- ACTOR SETUP ---------------------- #
 
@@ -252,6 +253,8 @@ class AlphaZoo:
             inference_iterations,
         )
         self._server_future = self.inference_server.run.remote()
+        if self.profiling:
+            profiler.attach("inference_server", [self.inference_server])
 
         inference_clients = ray.get(self.inference_server.get_clients.remote())
         gamer_clients, reanalyser_clients = distribute_clients(
@@ -262,10 +265,14 @@ class AlphaZoo:
             reanalyse_search_threads
         )
         self._gamers: list[ActorHandle] = self._create_gamers(gamer_clients, search_config)
+        if self.profiling:
+            profiler.attach("gamer", self._gamers)
 
         self._reanalysers: list[ActorHandle] = []
         if self._reanalyse_enabled:
             self._reanalysers = self._create_reanalysers(reanalyser_clients, reanalyse_search_config)
+            if self.profiling:
+                profiler.attach("reanalyser", self._reanalysers)
 
 
         # ----------------------- TRAINING ----------------------- #
@@ -380,7 +387,6 @@ class AlphaZoo:
                 search_config,
                 self.config.data.player_dependent_value,
                 clients,
-                Profiler(self._profiling_dir) if self.profiling else None,
                 self._reanalyse_enabled,
                 self._register_serializer_fn,
             )
@@ -556,26 +562,13 @@ class AlphaZoo:
         return self.metrics_store.get_public(), self.metrics_store.get_internal()
 
     def _finalize_profiling(self, profiler: Profiler, running_mode: Optional[str] = None) -> None:
-        # collect actor profiles
-        futures = [
-            gamer.get_profile_stats.remote()
-            for gamer in self._gamers
-        ]
-        actor_bytes_list = ray.get(futures)
-        actor_bytes = Profiler.merge(actor_bytes_list)
-        profiler.save_data_to_file(Profiler.bytes_to_pstats(actor_bytes), "actor_profile.prof")
-
-        # main process profile
-        main_bytes = profiler.stop()
-        profiler.save_data_to_file(Profiler.bytes_to_pstats(main_bytes), "main_profile.prof")
+        profiler.finish()
 
         internal = self.metrics_store.get_internal()
         profiler.save_metrics_to_file(internal, running_mode=running_mode)
 
-        d = profiler.output_dir
-        logger.info(f"\nProfiling results: {d}/")
-        logger.info(f"  snakeviz {d}/main_profile.prof")
-        logger.info(f"  snakeviz {d}/actor_profile.prof")
+        logger.info(f"\nProfiling results: {profiler.output_dir}/")
+        logger.info("  Open .speedscope.json files at https://www.speedscope.app/")
 
     def _log_training_run_info(
         self,

@@ -4,7 +4,7 @@ import itertools
 import math
 import threading
 from abc import ABC, abstractmethod
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Callable, Optional
 
 import numpy as np
@@ -59,19 +59,23 @@ class MCTS(ABC):
         num_simulations: int = self.config.simulation.mcts_simulations
         simulation_counter = itertools.count() # thread safe counter
 
-        futures = [
-            self._pool.submit(
-                self._search_tree,
-                root_node, game,
-                simulation_counter, num_simulations,
+        search_futures: list[Future] = []
+        for _ in range(self.num_threads):
+            search_futures.append(
+                self._pool.submit(
+                    self._search_tree,
+                    root_node, game,
+                    simulation_counter, num_simulations,
+                )
             )
-            for _ in range(self.num_threads)
-        ]
-        for f in futures:
-            f.result()
+        self._wait_for_search(search_futures)
 
         action = self._select_action(game, root_node, use_action_exploration)
         return action, root_node.get_child(action)
+    
+    def _wait_for_search(self, search_futures: list[Future]) -> None:
+        for f in search_futures:
+            f.result()
 
     def _search_tree(
         self,

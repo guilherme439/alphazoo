@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import os
 from queue import Empty, Queue
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import Callable, Optional
 
 import ray
 
@@ -12,9 +13,6 @@ from ..metrics import MetricsRecorder
 from ..search.explorer import Explorer
 from ..search.mcts.node import Node
 from .game_record import GameRecord
-
-if TYPE_CHECKING:
-    from ..profiling import Profiler
 
 
 @ray.remote(scheduling_strategy="SPREAD", max_concurrency=2)
@@ -37,7 +35,6 @@ class Gamer:
         search_config: SearchConfig,
         player_dependent_value: bool,
         inference_clients: list[IpcInferenceClient],
-        profiler: Profiler | None = None,
         reanalyse_enabled: bool = False,
         register_serializer_fn: Optional[Callable[[], None]] = None,
     ) -> None:
@@ -48,7 +45,6 @@ class Gamer:
         self.search_config = search_config
         self.player_dependent_value = player_dependent_value
         self.inference_clients = inference_clients
-        self.profiler = profiler
         self.reanalyse_enabled = reanalyse_enabled
 
         for client in self.inference_clients:
@@ -65,28 +61,15 @@ class Gamer:
         self._stopped = False
 
     def play_games(self, num_games: int) -> list[GameRecord]:
-        if self.profiler:
-            self.profiler.start()
-
         records: list[GameRecord] = []
         for _ in range(num_games):
             records.append(self._play_game())
-
-        if self.profiler:
-            self.profiler.accumulate(self.profiler.stop())
-
         return records
 
     def play_forever(self) -> None:
-        if self.profiler:
-            self.profiler.start()
-
         while not self._stopped:
             record = self._play_game()
             self._completed.put(record)
-
-        if self.profiler:
-            self.profiler.accumulate(self.profiler.stop())
 
     def get_completed_games(self) -> list[GameRecord]:
         records: list[GameRecord] = []
@@ -103,10 +86,8 @@ class Gamer:
     def get_metrics(self) -> dict:
         return self.metrics_recorder.drain()
 
-    def get_profile_stats(self) -> bytes:
-        if self.profiler is None:
-            raise RuntimeError("get_profile_stats called but profiler is not set")
-        return self.profiler.get_accumulated()
+    def get_pid(self) -> int:
+        return os.getpid()
 
     # ------------------------------------------------------------------
     # Internals

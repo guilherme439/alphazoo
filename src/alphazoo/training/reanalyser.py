@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Callable
 
@@ -54,6 +55,9 @@ class Reanalyser:
             player_dependent_value=player_dependent_value,
             threaded=search_config.simulation.parallel_search,
         )
+
+    def get_pid(self) -> int:
+        return os.getpid()
 
     def process(self, request: ReanalyseRequest) -> ReanalyseResult:
         game: IAlphazooGame = request.entry.game_snapshot
