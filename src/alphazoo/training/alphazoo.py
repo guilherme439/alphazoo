@@ -195,6 +195,15 @@ class AlphaZoo:
         )
         value_loss_function = get_value_loss_fn(config.learning.value_loss)
 
+        # --------------------- PROFILER SETUP --------------------- #
+
+        profiler: Optional[Profiler] = None
+        if self.profiling:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self._profiling_dir = os.path.join("profiling", timestamp)
+            profiler = Profiler(self._profiling_dir)
+            profiler.start()
+
         # ---------------------- ACTOR SETUP ---------------------- #
 
         # gamer actors configs
@@ -246,9 +255,9 @@ class AlphaZoo:
 
         inference_clients = ray.get(self.inference_server.get_clients.remote())
         gamer_clients, reanalyser_clients = distribute_clients(
-            inference_clients, 
+            inference_clients,
             num_gamers,
-            search_threads, 
+            search_threads,
             num_reanalysers,
             reanalyse_search_threads
         )
@@ -270,13 +279,6 @@ class AlphaZoo:
         )
 
         run_start = time.time()
-
-        profiler: Optional[Profiler] = None
-        if self.profiling:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            self._profiling_dir = os.path.join("profiling", timestamp)
-            profiler = Profiler(self._profiling_dir)
-            profiler.start()
         
 
         # ---- STARTUP ACTORS ---- #     

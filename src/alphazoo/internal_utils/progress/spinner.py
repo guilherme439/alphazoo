@@ -34,9 +34,9 @@ class Spinner:
     redrawn in place. Non-TTY emits a heartbeat log line every
     `heartbeat_sec` so piped/captured runs still show liveness.
 
-    When `max_duration` is provided the spinner expresses "patience": the
-    frame color shifts green → yellow → red and the tick interval slows
-    down as `elapsed / max_duration` grows. With `max_duration=None`
+    When `max_duration` is provided the spinner expresses "ripening": the
+    frame color shifts red → yellow → green and the tick interval speeds
+    up as `elapsed / max_duration` grows. With `max_duration=None`
     the spinner stays in its neutral cadence and color (current default).
 
     Driven by a background thread; no external updates needed.
@@ -199,21 +199,21 @@ class Spinner:
         if self._max_duration is None:
             return self._BASE_FRAME_INTERVAL
         t = self._patience_t()
-        return self._BASE_FRAME_INTERVAL + t * (self._MAX_FRAME_INTERVAL - self._BASE_FRAME_INTERVAL)
+        return self._MAX_FRAME_INTERVAL + t * (self._BASE_FRAME_INTERVAL - self._MAX_FRAME_INTERVAL)
 
     def _color_code(self) -> str:
         if not self._use_color or self._max_duration is None:
             return ""
         t = self._patience_t()
-        # Two-segment lerp through yellow: green (50,200,80) → yellow (220,200,30) → red (220,50,50)
+        # Two-segment lerp through yellow: red (220,50,50) → yellow (220,200,30) → green (50,200,80)
         if t < 0.5:
             u = t * 2
-            r = int(50 + u * (220 - 50))
-            g = 200
-            b = int(80 + u * (30 - 80))
+            r = 220
+            g = int(50 + u * (200 - 50))
+            b = int(50 + u * (30 - 50))
         else:
             u = (t - 0.5) * 2
-            r = 220
-            g = int(200 + u * (50 - 200))
-            b = int(30 + u * (50 - 30))
+            r = int(220 + u * (50 - 220))
+            g = 200
+            b = int(30 + u * (80 - 30))
         return f"\033[38;2;{r};{g};{b}m"

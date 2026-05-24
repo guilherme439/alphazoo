@@ -3,42 +3,51 @@ verbose: true
 running:
   running_mode: "asynchronous"
   training_steps: 100
-  num_gamers: 5
+  num_gamers: 6
   asynchronous:
     update_delay: 9
 cache:
   enabled: true
   max_size: 8000
 data:
+  observation_format: "channels_last"
+  network_input_format: "channels_first"
   player_dependent_value: true
 learning:
   replay_buffer:
-    window_size: 6000
-    leak_chance: 0.0
+    window_size: 10000
+    leak_chance: 0.00001
+    reanalyse:
+      num_workers: 2
+      positions_per_step: 16
+      min_buffer_fill_ratio: 0.35
+      search:
+        simulation:
+          mcts_simulations: 200
   learning_method: "samples"
   value_loss: "SE"
   policy_loss: "CE"
   samples:
-    batch_size: 32
-    num_samples: 32
-    late_heavy: true
+    batch_size: 64
+    num_samples: 16
+    late_heavy: false
 optimizer:
   optimizer_choice: "Adam"
 scheduler:
-  starting_lr: 0.001
-  boundaries: [10000]
+  starting_lr: 0.01
+  boundaries: [1000]
   gamma: 0.1
 search:
   simulation:
     mcts_simulations: 100
     keep_subtree: true
   uct:
-    pb_c_base: 10000
-    pb_c_init: 2.0
+    pb_c_base: 2000
+    pb_c_init: 2.5
   exploration:
-    number_of_softmax_moves: 0
-    epsilon_softmax_exploration: 0.04
-    epsilon_random_exploration: 0.0
+    number_of_softmax_moves: 9
+    epsilon_softmax_exploration: 0.001
+    epsilon_random_exploration: 0.001
     value_factor: 1.0
     root_exploration_distribution: "gamma"
     root_exploration_fraction: 0.15
