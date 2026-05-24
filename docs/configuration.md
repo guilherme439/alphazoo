@@ -51,9 +51,8 @@ AlphaZooConfig
 │   ├── enabled
 │   └── max_size
 ├── recurrent: RecurrentConfig | None
+│   ├── inference_iterations
 │   ├── train_iterations
-│   ├── pred_iterations
-│   ├── test_iterations
 │   ├── use_progressive_loss
 │   └── prog_alpha
 ├── learning: LearningConfig
@@ -195,9 +194,8 @@ Configuration for [DeepThinking](https://github.com/aks2203/deep-thinking)-style
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
+| `inference_iterations` | `int` | `1` | Recurrent steps used by the inference server. |
 | `train_iterations` | `int` | `1` | Recurrent steps during weight updates. |
-| `pred_iterations` | `int` | `1` | Recurrent steps during self-play MCTS inference. |
-| `test_iterations` | `int` | `1` | Recurrent steps during evaluation. |
 | `use_progressive_loss` | `bool` | `true` | Enable progressive loss. See [Progressive Loss](#progressive-loss). |
 | `prog_alpha` | `float` | `0.0` | Blend weight for progressive loss. |
 

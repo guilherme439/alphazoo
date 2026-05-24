@@ -36,9 +36,8 @@ class RunningConfig:
 
 @dataclass
 class RecurrentConfig:
+    inference_iterations: int = 1
     train_iterations: int = 1
-    pred_iterations: int = 1
-    test_iterations: int = 1
     use_progressive_loss: bool = True
     prog_alpha: float = 0.0
 

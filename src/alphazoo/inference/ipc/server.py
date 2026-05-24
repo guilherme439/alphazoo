@@ -71,7 +71,6 @@ class IpcInferenceServer:
             slot, client = self._create_slot_and_client(
                 i, state_size, action_size,
                 state_nbytes, policy_nbytes, value_nbytes,
-                self._is_recurrent,
             )
             self._slots.append(slot)
             self._clients.append(client)
@@ -153,9 +152,7 @@ class IpcInferenceServer:
         batch = torch.cat(states, dim=0)
         with rlock:
             if self._is_recurrent:
-                (policies, values), _ = self._model_host.recurrent_forward(
-                    batch, self._recurrent_iterations
-                )
+                (policies, values), _ = self._model_host.recurrent_forward(batch, self._recurrent_iterations)
             else:
                 policies, values = self._model_host.forward(batch)
 
@@ -180,7 +177,6 @@ class IpcInferenceServer:
         state_nbytes: int,
         policy_nbytes: int,
         value_nbytes: int,
-        is_recurrent: bool,
     ) -> tuple[InferenceSlot, IpcInferenceClient]:
         uid = uuid.uuid4().hex[:8]
         input_name = f"az_in_{index}_{uid}"
@@ -197,7 +193,7 @@ class IpcInferenceServer:
         )
         slot.initialize()
 
-        client = IpcInferenceClient(slot.new_view(), is_recurrent)
+        client = IpcInferenceClient(slot.new_view())
         return slot, client
 
     def _cleanup(self) -> None:

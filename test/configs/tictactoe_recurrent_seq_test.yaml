@@ -15,8 +15,8 @@ data:
   player_dependent_value: true
 
 recurrent:
+  inference_iterations: 2
   train_iterations: 2
-  pred_iterations: 2
   use_progressive_loss: true
   prog_alpha: 0.5
 

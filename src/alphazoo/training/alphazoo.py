@@ -12,8 +12,8 @@ from pettingzoo.utils.env import AECEnv
 from ray.actor import ActorHandle
 from ray.util import ActorPool
 
-from ..configs.alphazoo_config import AlphaZooConfig
-from ..configs.search_config import SearchConfig
+from ..configs.alphazoo_config import AlphaZooConfig, ReanalyseConfig
+from ..configs.search_config import SearchConfig, SimulationConfig
 from ..ialphazoo_game import IAlphazooGame
 from ..inference.ipc import IpcInferenceClient, IpcInferenceServer
 from ..internal_utils.common import (
@@ -182,13 +182,13 @@ class AlphaZoo:
         cache_max = config.cache.max_size
 
         if config.recurrent is not None:
-            pred_iterations = config.recurrent.pred_iterations
-            prog_alpha = config.recurrent.prog_alpha
+            inference_iterations = config.recurrent.inference_iterations
             use_progressive_loss = config.recurrent.use_progressive_loss
+            prog_alpha = config.recurrent.prog_alpha
         else:
-            pred_iterations = 1
-            prog_alpha = 0.0
+            inference_iterations = 1
             use_progressive_loss = False
+            prog_alpha = 0.0
 
         policy_loss_function, normalize_policy = get_policy_loss_fn(
             config.learning.policy_loss, config.learning.normalize_ce,
@@ -198,20 +198,20 @@ class AlphaZoo:
         # ---------------------- ACTOR SETUP ---------------------- #
 
         # gamer actors configs
-        num_gamers = config.running.num_gamers
-        search_config = config.search
-        simulation_config = config.search.simulation
-        search_threads = (
+        num_gamers: int = config.running.num_gamers
+        search_config: SearchConfig = config.search
+        simulation_config: SimulationConfig = config.search.simulation
+        search_threads: int = (
             simulation_config.parallel.num_search_threads
             if simulation_config.parallel_search else 1
         )
         
         # reanalyse actors configs
-        reanalyse_config = config.learning.replay_buffer.reanalyse
-        num_reanalysers = reanalyse_config.num_workers
-        reanalyse_search_config = reanalyse_config.search
-        reanalyse_simulation_config = reanalyse_search_config.simulation
-        reanalyse_search_threads = (
+        reanalyse_config: ReanalyseConfig = config.learning.replay_buffer.reanalyse
+        num_reanalysers: int = reanalyse_config.num_workers
+        reanalyse_search_config: SearchConfig = reanalyse_config.search
+        reanalyse_simulation_config: SimulationConfig = reanalyse_search_config.simulation
+        reanalyse_search_threads: int = (
             reanalyse_simulation_config.parallel.num_search_threads
             if reanalyse_simulation_config.parallel_search else 1
         )
@@ -240,7 +240,7 @@ class AlphaZoo:
             state_size,
             state_shape,
             action_size,
-            pred_iterations,
+            inference_iterations,
         )
         self._server_future = self.inference_server.run.remote()
 
@@ -252,11 +252,11 @@ class AlphaZoo:
             num_reanalysers,
             reanalyse_search_threads
         )
-        self._gamers: list[ActorHandle] = self._create_gamers(gamer_clients, search_config, pred_iterations)
+        self._gamers: list[ActorHandle] = self._create_gamers(gamer_clients, search_config)
 
         self._reanalysers: list[ActorHandle] = []
         if self._reanalyse_enabled:
-            self._reanalysers = self._create_reanalysers(reanalyser_clients, reanalyse_search_config, pred_iterations)
+            self._reanalysers = self._create_reanalysers(reanalyser_clients, reanalyse_search_config)
 
 
         # ----------------------- TRAINING ----------------------- #
@@ -370,14 +370,12 @@ class AlphaZoo:
         self,
         gamer_clients: list[list[IpcInferenceClient]],
         search_config: SearchConfig,
-        pred_iterations: int,
     ) -> list[ActorHandle]:
         gamers: list[ActorHandle] = []
         for clients in gamer_clients:
             gamer = Gamer.remote(
                 self.game,
                 search_config,
-                pred_iterations,
                 self.config.data.player_dependent_value,
                 clients,
                 Profiler(self._profiling_dir) if self.profiling else None,
@@ -391,13 +389,11 @@ class AlphaZoo:
         self,
         reanalyser_clients: list[list[IpcInferenceClient]],
         search_config: SearchConfig,
-        pred_iterations: int,
     ) -> list[ActorHandle]:
         reanalysers: list[ActorHandle] = []
         for clients in reanalyser_clients:
             reanalyser = Reanalyser.remote(
                 search_config,
-                pred_iterations,
                 self.config.data.player_dependent_value,
                 clients,
                 self._register_serializer_fn,

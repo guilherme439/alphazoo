@@ -1,4 +1,4 @@
-[Reference document for LLM agents only. Human-facing docs live in README.md and the rest of docs/.]
+[Reference document for LLM agents. Human-facing docs live in README.md and the rest of docs/.]
 
 # alphazoo — Project Overview
 
@@ -36,11 +36,14 @@ Two execution modes:
 
 ### MCTS (`search/`)
 
-- `Explorer` (`explorer.py`): runs configurable simulations per decision, UCT scoring for exploration/exploitation balance. Main entry point is `run_mcts(game, inference_clients, root_node, recurrent_iterations)`, used by `Gamer` during self-play with subtree reuse across moves.
+- `Explorer` (`explorer.py`): public facade. Lazily constructs an `AlphazeroMCTS` or `TraditionalMCTS` on first use of its two entry points: `run_alphazero_mcts(game, root_node, inference_clients, use_exploration_noise=False, use_action_exploration=False)` (network-guided, used by `Gamer` during self-play with subtree reuse across moves) and `run_traditional_mcts(game, root_node, use_action_exploration=False)` (uniform priors + random rollouts to terminal, no network).
+- `MCTS` (`mcts/mcts.py`): abstract base holding the tree walk, PUCT scoring, virtual-loss bookkeeping, backprop, action selection, and root exploration noise. Subclasses implement `_expand_node(node, game) -> float`. `_run_search` takes `use_exploration_noise` and `use_action_exploration` flags so callers decide per run whether to perturb root priors and how to pick the final action.
+- `AlphazeroMCTS` (`mcts/alphazero_mcts.py`): `_expand_node` queries an `IInferenceClient` (one per search thread, bound via the pool's `initializer`) for the policy prior and value estimate at the leaf.
+- `TraditionalMCTS` (`mcts/traditional_mcts.py`): `_expand_node` installs uniform priors over legal actions and estimates the leaf's value with a random rollout to terminal.
 - `select_action_with_mcts_for(env, model, search_config, obs_space_format, is_recurrent, recurrent_iterations)` (`utils.py`): top-level one-shot helper for external consumers. Wraps a PettingZoo env, builds a `LpcInferenceServer` around `model` (in-process, no Ray), runs a fresh tree, returns the action.
-- `Node` (`node.py`): tree node with visit counts, values, children, priors
+- `Node` (`mcts/node.py`): tree node with visit counts, values, children, priors
 - Action selection: softmax over visit counts early (exploration), argmax late (exploitation), with epsilon fallback
-- Dirichlet noise at root for training diversity
+- Dirichlet noise at root for training diversity (AlphaZero mode only)
 
 ### Game Interface (`ialphazoo_game.py`)
 
@@ -64,7 +67,7 @@ Two auxiliary structures keep sampling O(1): a parallel `_shuffled_keys` list (u
 
 ### Reanalyse (`training/reanalyser.py`, `training/targets.py`)
 
-When `learning.replay_buffer.reanalyse.num_workers > 0`, the trainer spins up a pool of `Reanalyser` Ray actors (`max_concurrency=1`) that re-run MCTS on positions already in the buffer with the current network. Each actor exposes a single `process(request: ReanalyseRequest) -> ReanalyseResult` method that runs `Explorer.run_mcts` against `request.entry.game_snapshot`, computes `policy = policy_from_root_visits(root, num_actions)` and `value = root.value()`, and returns a `ReanalyseResult`. The trainer dispatches work via `ray.util.ActorPool(self._reanalysers)` — no `ray.util.queue.Queue` in the loop, no `_QueueActor` middleman re-pickling buffer entries.
+When `learning.replay_buffer.reanalyse.num_workers > 0`, the trainer spins up a pool of `Reanalyser` Ray actors (`max_concurrency=1`) that re-run MCTS on positions already in the buffer with the current network. Each actor exposes a single `process(request: ReanalyseRequest) -> ReanalyseResult` method that runs `Explorer.run_alphazero_mcts` against `request.entry.game_snapshot`, computes `policy = policy_from_root_visits(root, num_actions)` and `value = root.value()`, and returns a `ReanalyseResult`. The trainer dispatches work via `ray.util.ActorPool(self._reanalysers)` — no `ray.util.queue.Queue` in the loop, no `_QueueActor` middleman re-pickling buffer entries.
 
 At the start of each training step, `AlphaZoo._run_reanalyse`:
 1. Drains any ready results from the actor pool (`drain_actor_pool_results(self._reanalyse_pool)`) and applies each via `ReplayBuffer.apply_reanalyse_result`.
@@ -93,7 +96,7 @@ Inference is organised behind two interfaces (`IInferenceClient`, `IInferenceSer
 - **`ipc/`** — Inter-Process Communication. `IpcInferenceServer` is a Ray actor on the same machine as its clients. It holds a `ModelHost` and serves inference to `IpcInferenceClient`s in other processes. Transport is owned by `InferenceSlot`: named shared memory for zero-copy tensor passing and named FIFO pipes for ready/done signalling. A single dispatcher thread waits on every slot's ready fd via `select()`, services cache hits immediately, and runs one stacked forward pass over the misses each cycle. Used by `AlphaZoo` for training-time self-play.
 - **`rpc/`** — Remote Procedure Call. Reserved for multi-machine deployments; not yet implemented.
 
-Both interfaces are tiny: clients expose `is_recurrent()`, `inference(state)`, and `recurrent_inference(state, iters_to_do, interim_thought)`; servers expose `get_clients()` and `publish_model(state_dict)`. Consumers (e.g. `Gamer`, `Explorer`) depend only on `IInferenceClient`.
+Both interfaces are tiny: clients expose a single `inference(state)` returning `(policy_logits, value)`; servers expose `get_clients()` and `publish_model(state_dict)`. Whether the underlying model is recurrent and how many recurrent iterations to run are server-side settings; callers don't need to know. Consumers (e.g. `Gamer`, `Explorer`) depend only on `IInferenceClient`.
 
 Weight updates on the `IpcInferenceServer` are protected by a read-write lock: the dispatcher takes the read lock around forward + cache put for each batch; `publish_model()` takes the write lock to swap weights and invalidate the cache atomically.
 
@@ -111,7 +114,7 @@ AlphaZooConfig
 ├── RunningConfig (sequential vs async, num gamers, training steps)
 ├── CacheConfig (enabled, max size)
 ├── RecurrentConfig | None  (required when using AlphaZooRecurrentNet)
-│   ├── train_iterations, pred_iterations, test_iterations
+│   ├── inference_iterations, train_iterations
 │   ├── use_progressive_loss: bool  (whether to use progressive loss)
 │   └── prog_alpha: float  (progressive loss blend weight, used when use_progressive_loss=True)
 ├── LearningConfig (buffer size, batch extraction, loss functions)

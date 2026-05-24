@@ -14,7 +14,7 @@ from pettingzoo.classic import connect_four_v3
 from alphazoo.configs import SearchConfig
 from alphazoo.networks import AlphaZooNet
 from alphazoo.search.explorer import Explorer
-from alphazoo.search.node import Node
+from alphazoo.search.mcts.node import Node
 
 from .utils.helpers import make_pettingzoo_game
 from .utils.mocks import MockInferenceClient
@@ -70,25 +70,25 @@ def make_high_sim_config(base_config, n_sims=64):
 class TestConnectFourMCTS:
 
     def test_selects_valid_action_from_start(self, search_config, inference_client):
-        explorer = Explorer(search_config, training=False)
+        explorer = Explorer(search_config)
         game = make_game()
         root = Node(0)
 
-        action, _ = explorer.run_mcts(game, [inference_client], root)
+        action, _ = explorer.run_alphazero_mcts(game, root, [inference_client])
         obs = game.observe()
         assert game.action_mask(obs)[action] == 1.0
 
     def test_root_expands_all_7_columns(self, search_config, inference_client):
-        explorer = Explorer(search_config, training=False)
+        explorer = Explorer(search_config)
         game = make_game()
         root = Node(0)
 
-        explorer.run_mcts(game, [inference_client], root)
+        explorer.run_alphazero_mcts(game, root, [inference_client])
         assert root.num_children() == 7
 
     def test_respects_full_column(self, search_config, inference_client):
         """Fill column 0 completely, verify MCTS never picks it."""
-        explorer = Explorer(search_config, training=False)
+        explorer = Explorer(search_config)
         game = make_game()
 
         for _ in range(3):
@@ -99,30 +99,30 @@ class TestConnectFourMCTS:
         mask = game.action_mask(obs)
         assert mask[0] == 0.0, "Column 0 should be full"
 
-        action, _ = explorer.run_mcts(game, [inference_client], Node(0))
+        action, _ = explorer.run_alphazero_mcts(game, Node(0), [inference_client])
         assert action != 0
 
     def test_does_not_mutate_game(self, search_config, inference_client):
-        explorer = Explorer(search_config, training=False)
+        explorer = Explorer(search_config)
         game = make_game()
         game.step(3)
         game.step(2)
 
         length_before = game.get_length()
         player_before = game.get_current_player()
-        explorer.run_mcts(game, [inference_client], Node(0))
+        explorer.run_alphazero_mcts(game, Node(0), [inference_client])
 
         assert game.get_length() == length_before
         assert game.get_current_player() == player_before
 
     def test_plays_full_game_without_illegal_moves(self, search_config, inference_client):
-        explorer = Explorer(search_config, training=False)
+        explorer = Explorer(search_config)
         game = make_game()
 
         moves = 0
         while not game.is_terminal():
             root = Node(0)
-            action, _ = explorer.run_mcts(game, [inference_client], root)
+            action, _ = explorer.run_alphazero_mcts(game, root, [inference_client])
 
             obs = game.observe()
             mask = game.action_mask(obs)
@@ -175,7 +175,7 @@ class TestConnectFourStrategic:
         """p1 has 3 in col 0, can win by playing col 0."""
         cfg = make_high_sim_config(search_config, n_sims=64)
         client = MockInferenceClient(UniformConnectFourNet())
-        explorer = Explorer(cfg, training=False)
+        explorer = Explorer(cfg)
 
         game = make_game()
         for _ in range(3):
@@ -183,14 +183,14 @@ class TestConnectFourStrategic:
             game.step(1)  # p2
         assert game.get_current_player() == 1
 
-        action, _ = explorer.run_mcts(game, [client], Node(0))
+        action, _ = explorer.run_alphazero_mcts(game, Node(0), [client])
         assert action == 0
 
     def test_finds_winning_move_for_player_2(self, search_config):
         """p2 has 3 in col 2, can win by playing col 2."""
         cfg = make_high_sim_config(search_config, n_sims=64)
         client = MockInferenceClient(UniformConnectFourNet())
-        explorer = Explorer(cfg, training=False)
+        explorer = Explorer(cfg)
 
         game = make_game()
         for _ in range(3):
@@ -200,14 +200,14 @@ class TestConnectFourStrategic:
         # Now p2 to play, winning move is col 2
         assert game.get_current_player() == 2
 
-        action, _ = explorer.run_mcts(game, [client], Node(0))
+        action, _ = explorer.run_alphazero_mcts(game, Node(0), [client])
         assert action == 2
 
     def test_winning_move_gets_most_visits(self, search_config):
         """The winning child node should accumulate the most visits."""
         cfg = make_high_sim_config(search_config, n_sims=64)
         client = MockInferenceClient(UniformConnectFourNet())
-        explorer = Explorer(cfg, training=False)
+        explorer = Explorer(cfg)
 
         game = make_game()
         for _ in range(3):
@@ -215,7 +215,7 @@ class TestConnectFourStrategic:
             game.step(1)
 
         root = Node(0)
-        explorer.run_mcts(game, [client], root)
+        explorer.run_alphazero_mcts(game, root, [client])
 
         visits = {a: c.visit_count() for a, c in root.children().items()}
         assert visits[0] == max(visits.values())

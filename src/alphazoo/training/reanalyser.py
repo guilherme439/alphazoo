@@ -9,7 +9,7 @@ import torch
 from ..configs.search_config import SearchConfig
 from ..inference.ipc import IpcInferenceClient
 from ..search.explorer import Explorer
-from ..search.node import Node
+from ..search.mcts.node import Node
 from ..ialphazoo_game import IAlphazooGame
 from .replay_buffer import BufferEntry
 from .targets import policy_from_root_visits
@@ -36,7 +36,6 @@ class Reanalyser:
     def __init__(
         self,
         search_config: SearchConfig,
-        recurrent_iterations: int,
         player_dependent_value: bool,
         inference_clients: list[IpcInferenceClient],
         register_serializer_fn: Callable[[], None],
@@ -44,7 +43,6 @@ class Reanalyser:
         register_serializer_fn()
 
         self.search_config = search_config
-        self.recurrent_iterations = recurrent_iterations
         self.player_dependent_value = player_dependent_value
         self.inference_clients = inference_clients
 
@@ -53,7 +51,6 @@ class Reanalyser:
 
         self.explorer = Explorer(
             search_config,
-            training=True,
             player_dependent_value=player_dependent_value,
             threaded=search_config.simulation.parallel_search,
         )
@@ -62,8 +59,12 @@ class Reanalyser:
         game: IAlphazooGame = request.entry.game_snapshot
         
         root_node = Node(0)
-        self.explorer.run_mcts(
-            game, self.inference_clients, root_node, self.recurrent_iterations
+        self.explorer.run_alphazero_mcts(
+            game,
+            root_node,
+            self.inference_clients,
+            use_exploration_noise=True,
+            use_action_exploration=True,
         )
         policy = policy_from_root_visits(root_node, game.get_action_size())
         value = root_node.value()

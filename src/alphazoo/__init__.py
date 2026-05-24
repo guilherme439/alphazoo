@@ -17,7 +17,7 @@ from .training.replay_buffer import ReplayBuffer
 from .training.game_record import GameRecord
 
 from .search.explorer import Explorer
-from .search.node import Node
+from .search.mcts.node import Node
 
 from .networks import AlphaZooNet, AlphaZooRecurrentNet, ModelHost
 

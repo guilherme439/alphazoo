@@ -82,7 +82,6 @@ class Node:
     # ------------------------------------------------------------------
     # Methods
     # ------------------------------------------------------------------
-
     
     def update_value(self, latest_value: float) -> None:
         self._value_sum += latest_value

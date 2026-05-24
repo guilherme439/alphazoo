@@ -9,7 +9,6 @@ import copy
 from typing import Any
 
 import numpy as np
-import ray.cloudpickle as cloudpickle
 import torch
 from gymnasium.spaces.utils import flatdim
 from pettingzoo.utils.env import AECEnv
@@ -53,14 +52,7 @@ class PettingZooWrapper(IAlphazooGame):
         self._obs_is_float32 = self._check_obs_dtype() # we check the type to avoid unnecessary convertions
         self._action_shape, self._num_actions = self._compute_action_info()
         self._state_shape, self._state_size = self._compute_state_info()
-
-    @staticmethod
-    def serialize(game: "PettingZooWrapper") -> bytes:
-        return cloudpickle.dumps(game)
-
-    @staticmethod
-    def deserialize(data: bytes) -> "PettingZooWrapper":
-        return cloudpickle.loads(data)
+        
 
     def reset(self, *args, **kwargs) -> None:
         self.env.reset(*args, **kwargs)

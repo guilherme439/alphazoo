@@ -29,8 +29,8 @@ Requires a `RecurrentConfig` in `AlphaZooConfig`:
 ```python
 config = AlphaZooConfig(
     recurrent=RecurrentConfig(
+        inference_iterations=3,   # recurrent steps used by the inference server
         train_iterations=3,       # recurrent steps during training
-        pred_iterations=3,        # recurrent steps during self-play MCTS
         use_progressive_loss=True,
         prog_alpha=0.5,           # blend: (1-alpha)*full_loss + alpha*progressive_loss
     ),

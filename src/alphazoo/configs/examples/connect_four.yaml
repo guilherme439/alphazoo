@@ -19,9 +19,8 @@ cache:
   max_size: 8000
 
 recurrent:
+  inference_iterations: 3
   train_iterations: 3
-  pred_iterations: 3
-  test_iterations: 1
   use_progressive_loss: true
   prog_alpha: 0.5
 

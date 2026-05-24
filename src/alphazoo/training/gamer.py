@@ -10,7 +10,7 @@ from ..ialphazoo_game import IAlphazooGame
 from ..inference.ipc import IpcInferenceClient
 from ..metrics import MetricsRecorder
 from ..search.explorer import Explorer
-from ..search.node import Node
+from ..search.mcts.node import Node
 from .game_record import GameRecord
 
 if TYPE_CHECKING:
@@ -19,12 +19,22 @@ if TYPE_CHECKING:
 
 @ray.remote(scheduling_strategy="SPREAD", max_concurrency=2)
 class Gamer:
+    """
+⠀⠀⠀⠀⠀⣀⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⣀⠀⠀⠀⠀⠀
+⠀⠀⠀⣠⣾⣿⣿⣿⣦⣄⡀⠀⠀⢀⣠⣴⣿⣿⣿⣷⣄⠀⠀⠀
+⠀⠀⣼⣿⣿⠛⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣏⠉⣹⣿⣧⠀⠀
+⠀⣼⣿⣉⣉⠀⣉⣙⣿⣿⣿⣿⣿⣿⣿⣟⠁⣹⣿⣏⠀⣹⣧⠀
+⢠⣿⣿⣿⣿⣀⣿⣿⣿⣉⣉⣿⣿⣉⣹⣿⣿⣏⠀⣹⣿⣿⣿⡄
+⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿⠿⠿⠿⠿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇
+⢸⣿⣿⣿⣿⣿⠟⠉⠀⠀⠀⠀⠀⠀⠀⠀⠉⠻⣿⣿⣿⣿⣿⡇
+⠸⣿⣿⣿⡟⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⢻⣿⣿⣿⠇
+⠀⠉⠉⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠉⠉⠀
+    """
 
     def __init__(
         self,
         game: IAlphazooGame,
         search_config: SearchConfig,
-        recurrent_iterations: int,
         player_dependent_value: bool,
         inference_clients: list[IpcInferenceClient],
         profiler: Profiler | None = None,
@@ -36,7 +46,6 @@ class Gamer:
 
         self.game = game
         self.search_config = search_config
-        self.recurrent_iterations = recurrent_iterations
         self.player_dependent_value = player_dependent_value
         self.inference_clients = inference_clients
         self.profiler = profiler
@@ -47,7 +56,6 @@ class Gamer:
 
         self.explorer = Explorer(
             search_config,
-            training=True,
             player_dependent_value=player_dependent_value,
             threaded=search_config.simulation.parallel_search,
         )
@@ -123,8 +131,12 @@ class Gamer:
         while not game.is_terminal():
             record.store_step(game)
 
-            action_i, chosen_child = self.explorer.run_mcts(
-                game, self.inference_clients, root_node, self.recurrent_iterations
+            action_i, chosen_child = self.explorer.run_alphazero_mcts(
+                game,
+                root_node,
+                self.inference_clients,
+                use_exploration_noise=True,
+                use_action_exploration=True,
             )
 
             tree_size = root_node.visit_count()

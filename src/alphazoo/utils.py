@@ -10,7 +10,7 @@ from torch import nn
 from .configs.search_config import SearchConfig
 from .inference.lpc import LpcInferenceServer
 from .search.explorer import Explorer
-from .search.node import Node
+from .search.mcts.node import Node
 from .wrappers.pettingzoo_wrapper import PettingZooWrapper
 
 
@@ -35,13 +35,17 @@ def select_action_with_mcts_for(
         network_input_format="channels_first",
         reset_env=False,
     )
-    server = LpcInferenceServer(model, num_clients=1, is_recurrent=is_recurrent)
-    explorer = Explorer(search_config, training=False)
+    server = LpcInferenceServer(
+        model,
+        num_clients=1,
+        is_recurrent=is_recurrent,
+        recurrent_iterations=recurrent_iterations,
+    )
+    explorer = Explorer(search_config)
     root = Node(prior=0.0)
-    action, _ = explorer.run_mcts(
+    action, _ = explorer.run_alphazero_mcts(
         game=game,
         inference_clients=server.get_clients(),
         root_node=root,
-        recurrent_iterations=recurrent_iterations,
     )
     return action

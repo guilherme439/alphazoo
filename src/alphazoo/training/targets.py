@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import torch
 
-from ..search.node import Node
+from ..search.mcts.node import Node
 
 
 def policy_from_root_visits(root_node: Node, policy_size: int) -> torch.Tensor:
