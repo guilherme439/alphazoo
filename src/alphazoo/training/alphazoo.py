@@ -55,6 +55,7 @@ class AlphaZoo:
         When `optimizer_state_dict` or `scheduler_state_dict` is provided, the
         corresponding section of `config` (`optimizer` / `scheduler`) is ignored.
         """
+        
         self.config = config
         self.profiling = "ALPHAZOO_PROFILE" in os.environ
 
@@ -150,15 +151,22 @@ class AlphaZoo:
             "inference/bucket_size",
         })
     
+    # ------------------------------------------------------------------------- #
+    # -------------------------- PUBLIC FACING METHODS ------------------------ #
+    # ------------------------------------------------------------------------- #
+
+    # --------------- INTERNAL STATE PROBES --------------- #
 
     def get_optimizer_state_dict(self) -> dict:
-        return self.optimizer.state_dict()
+        return deepcopy(self.optimizer.state_dict())
 
     def get_scheduler_state_dict(self) -> dict:
-        return self.scheduler.state_dict()
+        return deepcopy(self.scheduler.state_dict())
 
     def get_replay_buffer_state(self) -> dict:
-        return self.replay_buffer.get_state()
+        return deepcopy(self.replay_buffer.get_state())
+    
+    # ----------------------------------------------------- #
 
     def train(self, on_step_end: Optional[StepCallback] = None) -> None:
         logger.setLevel(logging.INFO if self.config.verbose else logging.WARNING)
