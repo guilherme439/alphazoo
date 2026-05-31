@@ -31,7 +31,12 @@ class ModelHost:
 
     def device(self) -> str:
         return self._device
-    
+
+    def device_name(self) -> str:
+        if self._device.startswith("cuda"):
+            return torch.cuda.get_device_name(self._device)
+        return self._device
+
     def is_recurrent(self) -> bool:
         return isinstance(self.model, AlphaZooRecurrentNet)
 

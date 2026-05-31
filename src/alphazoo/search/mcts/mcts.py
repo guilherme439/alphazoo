@@ -28,12 +28,11 @@ class MCTS(ABC):
         self.rng = np.random.default_rng()
         self.threaded = threaded
         self._tree_lock: Optional[threading.Lock] = None
+        self.num_threads = search_config.simulation.effective_search_threads
         if threaded:
-            self.num_threads = search_config.simulation.parallel.num_search_threads
             self.virtual_loss = search_config.simulation.parallel.virtual_loss
             self._tree_lock = threading.Lock()
         else:
-            self.num_threads = 1
             self.virtual_loss = 0.0
 
         self._pool = self._create_pool()

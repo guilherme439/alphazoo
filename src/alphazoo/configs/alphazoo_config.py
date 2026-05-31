@@ -64,8 +64,9 @@ class DataConfig:
 
 @dataclass
 class ReanalyseConfig:
-    num_workers: int = 0
-    positions_per_step: int = 0
+    enabled: bool = False
+    num_workers: int = 1
+    positions_per_step: int = 1
     min_buffer_fill_ratio: float = 0.5
     search: SearchConfig = field(default_factory=SearchConfig)
 

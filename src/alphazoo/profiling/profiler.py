@@ -25,9 +25,9 @@ class Profiler:
     Each target PID gets its own py-spy `record` subprocess that writes a speedscope JSON file into `output_dir`.
     Subprocesses are stopped gracefully with SIGINT so py-spy flushes the captured profile to disk.
 
-    `finish()` stops every subprocess and then writes a per-category aggregate file
-    (`{category}_all.speedscope.json`) that groups thread profiles by their Python
-    thread name and sums samples across processes of the same category.
+    `finish()` stops every subprocess and then writes a per-group aggregate file
+    (`{group}_all.speedscope.json`) that merges thread profiles by their Python
+    thread name and sums samples across processes of the same group.
     """
 
     _SAMPLE_RATE_HZ = 100
@@ -37,35 +37,33 @@ class Profiler:
     def __init__(self, output_dir: str) -> None:
         self.output_dir = output_dir
         self._processes: list[tuple[subprocess.Popen, str]] = []
-        self._category_files: dict[str, list[str]] = defaultdict(list)
+        self._group_files: dict[str, list[str]] = defaultdict(list)
         os.makedirs(output_dir, exist_ok=True)
 
     def start_main(self) -> None:
         self._spawn("main", "main", os.getpid())
 
-    def attach(self, category: str, actors: list[ActorHandle]) -> None:
+    def attach(self, group_name: str, actors: list[ActorHandle]) -> None:
         if not actors:
             return
         pids: list[int] = ray.get([actor.get_pid.remote() for actor in actors])
         is_unique = (len(pids) == 1)
         for i, pid in enumerate(pids):
-            name = category if is_unique else f"{category}_{i}"
-            self._spawn(category, name, pid)
+            name = group_name if is_unique else f"{group_name}_{i}"
+            self._spawn(group_name, name, pid)
 
     def finish(self) -> None:
         self._stop_all()
         self._write_aggregate_results()
 
-    def save_metrics_to_file(self, metrics: dict, running_mode: Optional[str] = None) -> str:
+    def save_metrics_to_file(self, metrics: dict) -> str:
         path = os.path.join(self.output_dir, "summary.txt")
         total_run_time = metrics.get("time/total", 0.0)
         with open(path, "w") as f:
-            if running_mode:
-                f.write(f"Running mode: {running_mode}\n")
             f.write(f"Total run time: {total_run_time:.2f}s ({total_run_time / 60:.2f}m)\n")
         return path
 
-    def _spawn(self, category: str, name: str, pid: int) -> None:
+    def _spawn(self, group: str, name: str, pid: int) -> None:
         executable = shutil.which("py-spy")
         if executable is None:
             raise RuntimeError("py-spy not found on PATH. Install with `pip install py-spy`.")
@@ -92,7 +90,7 @@ class Profiler:
             rc = proc.wait(timeout=self._FAILURE_DETECT_S)
         except subprocess.TimeoutExpired:
             self._processes.append((proc, output_path))
-            self._category_files[category].append(output_path)
+            self._group_files[group].append(output_path)
             logger.info("Profiler: py-spy attached to %s with pid %d", name, pid)
             return
 
@@ -130,7 +128,7 @@ class Profiler:
         self._processes.clear()
 
     def _write_aggregate_results(self) -> None:
-        for category, paths in self._category_files.items():
+        for group, paths in self._group_files.items():
             if len(paths) <= 1:
                 continue
 
@@ -138,14 +136,14 @@ class Profiler:
             if len(present) < 2:
                 logger.warning(
                     "Skipping merge for %s: only %d of %d output files present",
-                    category, len(present), len(paths),
+                    group, len(present), len(paths),
                 )
                 continue
             
-            output_path = self._merge_into_aggregate(category, present)
+            output_path = self._merge_into_aggregate(group, present)
             logger.info("Profiler: aggregated %d files into %s", len(present), output_path)
 
-    def _merge_into_aggregate(self, category: str, input_paths: list[str]) -> str:
+    def _merge_into_aggregate(self, group: str, input_paths: list[str]) -> str:
         docs = []
         for path in input_paths:
             with open(path) as f:
@@ -186,11 +184,11 @@ class Profiler:
             "shared": {"frames": merged_frames},
             "profiles": merged_profiles,
             "exporter": "alphazoo py-spy merger",
-            "name": f"{category} (aggregated)",
+            "name": f"{group} (aggregated)",
             "activeProfileIndex": 0,
         }
 
-        output_path = os.path.join(self.output_dir, f"{category}_all.speedscope.json")
+        output_path = os.path.join(self.output_dir, f"{group}_all.speedscope.json")
         with open(output_path, "w") as f:
             json.dump(output, f)
         return output_path

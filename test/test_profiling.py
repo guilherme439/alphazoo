@@ -8,7 +8,7 @@ from pettingzoo.classic import connect_four_v3
 
 from alphazoo.configs.alphazoo_config import AlphaZooConfig
 from alphazoo.networks import AlphaZooNet
-from alphazoo.training.alphazoo import AlphaZoo
+from alphazoo import AlphaZoo
 
 # python -m pytest test/test_profiling.py -m profiling -s 2>/dev/null
 

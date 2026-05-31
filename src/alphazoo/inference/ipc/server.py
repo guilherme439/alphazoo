@@ -5,11 +5,14 @@ import select
 import shutil
 import tempfile
 import threading
+from typing import Optional
 import uuid
 
 import ray
 import torch
 from readerwriterlock import rwlock
+
+from alphazoo.configs.alphazoo_config import CacheConfig, RecurrentConfig
 
 from ...metrics import MetricsRecorder
 from ...networks.model_host import ModelHost
@@ -41,20 +44,19 @@ class IpcInferenceServer:
     def __init__(
         self,
         model_host: ModelHost,
-        cache_enabled: bool,
-        cache_max_size: int,
         num_clients: int,
-        state_size: int,
         state_shape: tuple[int, ...],
+        state_size: int,
         action_size: int,
-        recurrent_iterations: int,
+        cache_config: CacheConfig,
+        recurrent_config: Optional[RecurrentConfig]
     ) -> None:
         self._model_host = model_host
         self._is_recurrent = model_host.is_recurrent()
-        self._recurrent_iterations = recurrent_iterations
+        self._recurrent_iterations = recurrent_config.inference_iterations if recurrent_config else None
 
-        self._cache_enabled = cache_enabled
-        self._cache = KeylessCache(cache_max_size) if cache_enabled else None
+        self._cache_enabled = cache_config.enabled
+        self._cache = KeylessCache(cache_config.max_size) if self._cache_enabled else None
 
         self._model_lock = rwlock.RWLockFair()
         self._wlock = self._model_lock.gen_wlock()

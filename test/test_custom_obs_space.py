@@ -16,7 +16,7 @@ import torch.nn as nn
 
 from alphazoo.configs.alphazoo_config import AlphaZooConfig
 from alphazoo.networks import AlphaZooNet
-from alphazoo.training.alphazoo import AlphaZoo
+from alphazoo import AlphaZoo
 from alphazoo.wrappers.pettingzoo_wrapper import PettingZooWrapper
 
 from .utils.mocks import MockPettingZooEnv

@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any, Optional
 import numpy as np
 import torch
 
+from alphazoo.configs.alphazoo_config import ReplayBufferConfig
+
 from ..ialphazoo_game import IAlphazooGame
 from .game_record import GameRecord
 
@@ -31,10 +33,10 @@ class BufferEntry:
 
 class ReplayBuffer:
 
-    def __init__(self, window_size: int, leak_chance: float) -> None:
+    def __init__(self, config: ReplayBufferConfig) -> None:
         self._buffer: OrderedDict[int, BufferEntry] = OrderedDict()
-        self._window_size = window_size
-        self._leak_chance = leak_chance
+        self._window_size = config.window_size
+        self._leak_chance = config.leak_chance
 
         # This list and dict allows us to do sampling operations in O(batch_size) instead of O(N)
         self._shuffled_keys: list[int] = []
@@ -109,14 +111,14 @@ class ReplayBuffer:
         )
         self._add_to_buffer(key, reanalysed_entry)
     
-    def get_state(self) -> dict:
+    def state_dict(self) -> dict:
         return {
             'buffer': self._buffer,
             'total_positions_seen': self._total_positions_seen,
             'duplicates_absorbed': self._duplicates_absorbed,
         }
 
-    def load_state(self, state: dict) -> None:
+    def load(self, state: dict) -> None:
         self._buffer = state['buffer']
         self._total_positions_seen = state['total_positions_seen']
         self._duplicates_absorbed = state['duplicates_absorbed']

@@ -3,10 +3,13 @@ from __future__ import annotations
 import logging
 import math
 from random import randrange
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 import torch
 from torch import Tensor, nn
+
+from alphazoo.configs.alphazoo_config import LearningConfig, RecurrentConfig
+from alphazoo.internal_utils.common import get_policy_loss_fn, get_value_loss_fn
 
 from ..metrics import MetricsRecorder
 from ..networks.model_host import ModelHost
@@ -14,86 +17,116 @@ from .replay_buffer import ReplayBuffer
 
 logger = logging.getLogger("alphazoo")
 
-LossFunction = Callable[[Tensor, Tensor], Tensor]
-
-
 class NetworkTrainer:
 
-    def __init__(self, model_host: ModelHost, optimizer: Any, scheduler: Any) -> None:
+    MAX_SAMPLES_BATCH_SIZE_RATIO = 0.05
+    MAX_EPOCHS_BATCH_SIZE_RATIO = 0.20
+
+    def __init__(
+        self,
+        model_host: ModelHost,
+        optimizer: Any,
+        scheduler: Any,
+        replay_buffer: ReplayBuffer,
+        config: LearningConfig,
+        recurrent_config: Optional[RecurrentConfig] = None
+    ) -> None:
         self.model_host = model_host
         self.optimizer = optimizer
         self.scheduler = scheduler
+        self.replay_buffer = replay_buffer
+        self.config = config
+        self.recurrent_config = recurrent_config
+
+        self.policy_loss_function, self.normalize_policy = get_policy_loss_fn(config.policy_loss, config.normalize_ce)
+        self.value_loss_function = get_value_loss_fn(config.value_loss)
+
         self.recorder = MetricsRecorder()
 
     def get_metrics(self) -> dict:
         return self.recorder.drain()
 
-    def get_state_dict(self) -> dict:
+    def get_model_state_dict(self) -> dict:
         return self.model_host.get_state_dict()
+    
+    def run_training_step(self) -> None:
+        replay_size: int = len(self.replay_buffer)
+        if replay_size == 0:
+            logger.warning("WARNING: Replay buffer is empty; skipping training step.")
+            return
 
-    def get_late_heavy_distribution(self, replay_size: int) -> list[float]:
-        variation = 0.5
-        offset = (1 - variation) / 2
-        fraction = variation / replay_size
+        match(self.config.learning_method):
+            case "epochs":
+                effective_batch_size = self._capped_batch_size(
+                    self.config.epochs.batch_size, replay_size, self.MAX_EPOCHS_BATCH_SIZE_RATIO,
+                )
+                epochs = self.config.epochs.learning_epochs
+                batches_per_epoch = replay_size // effective_batch_size
+                total_updates = epochs * batches_per_epoch
+                logger.info(
+                    f"Total updates: {total_updates} | Batch size: {effective_batch_size} "
+                    f"| Epochs: {epochs} | Batches per epoch: {batches_per_epoch}"
+                )
+                self._train_with_epochs(effective_batch_size, batches_per_epoch, epochs)
 
-        probs: list[float] = []
-        total = offset
-        for _ in range(replay_size):
-            total += fraction
-            probs.append(total)
+            case "samples":
+                effective_batch_size = self._capped_batch_size(
+                    self.config.samples.batch_size, replay_size, self.MAX_SAMPLES_BATCH_SIZE_RATIO,
+                )
+                num_samples = self.config.samples.num_samples
+                total_drawn_positions = effective_batch_size * num_samples
+                if total_drawn_positions > replay_size:
+                    logger.warning(
+                        f"\nWARNING: Oversampling -> "
+                        f"batch_size ({effective_batch_size}) * num_samples ({num_samples}) = {total_drawn_positions} "
+                        f"exceeds replay buffer size ({replay_size})"
+                    )
+                
+                logger.info(f"\nTotal updates: {num_samples} | Batch size: {effective_batch_size}")
+                self._train_with_samples(effective_batch_size, num_samples)
 
-        total_sum = sum(probs)
-        return [p / total_sum for p in probs]
+            case _:
+                raise Exception("Bad learning_method config.")
+            
 
-    def train_with_epochs(
+    def _capped_batch_size(self, batch_size: int, replay_size: int, ratio: float) -> int:
+        """Cap `batch_size` at `ratio` of `replay_size` (minimum 1)."""
+        return max(1, min(batch_size, int(ratio * replay_size)))
+
+    def _train_with_epochs(
         self,
-        replay_buffer: ReplayBuffer,
         batch_size: int,
-        replay_size: int,
-        policy_loss_function: LossFunction,
-        value_loss_function: LossFunction,
-        normalize_policy: bool,
-        train_iterations: int,
-        prog_alpha: float,
-        use_progressive_loss: bool,
-        learning_epochs: int,
+        batches_per_epoch: int,
+        num_epochs: int
     ) -> list[tuple[float, float, float]]:
-        number_of_batches = replay_size // batch_size
-        logger.info("\nBatches: " + str(number_of_batches) + " | Batch size: " + str(batch_size))
-
-        total_updates = learning_epochs * number_of_batches
-        logger.info("Total updates: " + str(total_updates))
-
+        
         epoch_losses: list[tuple[float, float, float]] = []
-
-        for e in range(learning_epochs):
-            replay_buffer.shuffle()
+        for e in range(num_epochs):
+            self.replay_buffer.shuffle()
 
             epoch_value_loss = 0.0
             epoch_policy_loss = 0.0
             epoch_combined_loss = 0.0
 
-            for b in range(number_of_batches):
+            for b in range(batches_per_epoch):
                 start_index = b * batch_size
                 next_index = (b + 1) * batch_size
 
-                batch = replay_buffer.get_slice(start_index, next_index)
+                batch = self.replay_buffer.get_slice(start_index, next_index)
 
-                value_loss, policy_loss, combined_loss = self._batch_update_weights(
-                    batch, policy_loss_function, value_loss_function,
-                    normalize_policy, train_iterations, prog_alpha, use_progressive_loss)
+                value_loss, policy_loss, combined_loss = self._batch_update_weights(batch)
 
                 epoch_value_loss += value_loss
                 epoch_policy_loss += policy_loss
                 epoch_combined_loss += combined_loss
 
-            epoch_value_loss /= number_of_batches
-            epoch_policy_loss /= number_of_batches
-            epoch_combined_loss /= number_of_batches
+            epoch_value_loss /= batches_per_epoch
+            epoch_policy_loss /= batches_per_epoch
+            epoch_combined_loss /= batches_per_epoch
 
             epoch_losses.append((epoch_value_loss, epoch_policy_loss, epoch_combined_loss))
 
-            logger.info("Epoch " + str(e + 1) + "/" + str(learning_epochs) + " done.")
+            logger.info("Epoch " + str(e + 1) + "/" + str(num_epochs) + " done.")
 
         v_losses, p_losses, c_losses = zip(*epoch_losses)
         self.recorder.scalar("train/value_loss", sum(v_losses) / len(v_losses))
@@ -102,36 +135,24 @@ class NetworkTrainer:
 
         return epoch_losses
 
-    def train_with_samples(
+    def _train_with_samples(
         self,
-        replay_buffer: ReplayBuffer,
         batch_size: int,
-        replay_size: int,
-        policy_loss_function: LossFunction,
-        value_loss_function: LossFunction,
-        normalize_policy: bool,
-        train_iterations: int,
-        prog_alpha: float,
-        use_progressive_loss: bool,
-        num_samples: int,
-        late_heavy: bool,
+        num_samples: int
     ) -> tuple[float, float, float]:
+        
         probs: list[float] = []
-        if late_heavy:
-            probs = self.get_late_heavy_distribution(replay_size)
+        if self.config.samples.late_heavy:
+            probs = self.get_late_heavy_distribution()
 
         average_value_loss = 0.0
         average_policy_loss = 0.0
         average_combined_loss = 0.0
 
-        logger.info("\nTotal updates: " + str(num_samples) + " | Batch size: " + str(batch_size))
-
         for _ in range(num_samples):
-            batch = replay_buffer.get_sample(batch_size, probs)
+            batch = self.replay_buffer.get_sample(batch_size, probs)
 
-            value_loss, policy_loss, combined_loss = self._batch_update_weights(
-                batch, policy_loss_function, value_loss_function,
-                normalize_policy, train_iterations, prog_alpha, use_progressive_loss)
+            value_loss, policy_loss, combined_loss = self._batch_update_weights(batch)
 
             average_value_loss += value_loss
             average_policy_loss += policy_loss
@@ -147,16 +168,24 @@ class NetworkTrainer:
 
         return average_value_loss, average_policy_loss, average_combined_loss
 
-    def _batch_update_weights(
-        self,
-        batch: list[Any],
-        policy_loss_function: LossFunction,
-        value_loss_function: LossFunction,
-        normalize_policy: bool,
-        train_iterations: int,
-        alpha: float,
-        use_progressive_loss: bool,
-    ) -> tuple[float, float, float]:
+    def get_late_heavy_distribution(self) -> list[float]:
+        replay_size: int = len(self.replay_buffer)
+        
+        variation = 0.5
+        offset = (1 - variation) / 2
+        fraction = variation / replay_size
+
+        probs: list[float] = []
+        total = offset
+        for _ in range(replay_size):
+            total += fraction
+            probs.append(total)
+
+        total_sum = sum(probs)
+        return [p / total_sum for p in probs]
+    
+    def _batch_update_weights(self, batch: list[Any]) -> tuple[float, float, float]:
+        
         self.optimizer.zero_grad()
 
         value_loss: Tensor | float = 0.0
@@ -164,12 +193,9 @@ class NetworkTrainer:
         combined_loss: Tensor | float = 0.0
 
         if self.model_host.is_recurrent():
-            value_loss, policy_loss, combined_loss = self._recurrent_batch_update(
-                batch, policy_loss_function, value_loss_function,
-                normalize_policy, train_iterations, alpha, use_progressive_loss)
+            value_loss, policy_loss, combined_loss = self._recurrent_batch_update(batch)
         else:
-            value_loss, policy_loss, combined_loss = self._standard_batch_update(
-                batch, policy_loss_function, value_loss_function, normalize_policy)
+            value_loss, policy_loss, combined_loss = self._standard_batch_update(batch)
 
         loss = combined_loss
 
@@ -179,31 +205,14 @@ class NetworkTrainer:
 
         return value_loss.item(), policy_loss.item(), combined_loss.item()  # type: ignore[union-attr]
 
-    def _standard_batch_update(
-        self,
-        batch: list[Any],
-        policy_loss_function: LossFunction,
-        value_loss_function: LossFunction,
-        normalize_policy: bool,
-    ) -> tuple[Tensor, Tensor, Tensor]:
+    def _standard_batch_update(self, batch: list[Any]) -> tuple[Tensor, Tensor, Tensor]:
         states, targets = list(zip(*batch))
         batch_input = torch.cat(states, 0)
         batch_size = len(states)
         outputs = self.model_host.forward(batch_input)
-        return self._calculate_loss(
-            outputs, targets, batch_size,
-            policy_loss_function, value_loss_function, normalize_policy)
+        return self._calculate_loss(outputs, targets, batch_size)
 
-    def _recurrent_batch_update(
-        self,
-        batch: list[Any],
-        policy_loss_function: LossFunction,
-        value_loss_function: LossFunction,
-        normalize_policy: bool,
-        train_iterations: int,
-        alpha: float,
-        use_progressive_loss: bool,
-    ) -> tuple[Tensor | float, Tensor | float, Tensor | float]:
+    def _recurrent_batch_update(self, batch: list[Any]) -> tuple[Tensor | float, Tensor | float, Tensor | float]:
         value_loss: Tensor | float = 0.0
         policy_loss: Tensor | float = 0.0
         combined_loss: Tensor | float = 0.0
@@ -211,27 +220,26 @@ class NetworkTrainer:
         states, targets = list(zip(*batch))
         batch_size = len(states)
         batch_input = torch.cat(states, 0)
-        recurrent_iterations = train_iterations
+        recurrent_iterations = self.recurrent_config.train_iterations
 
-        if use_progressive_loss:
+        if self.recurrent_config.use_progressive_loss:
             total_value_loss: Tensor | float = 0.0
             total_policy_loss: Tensor | float = 0.0
             total_combined_loss: Tensor | float = 0.0
             prog_value_loss: Tensor | float = 0.0
             prog_policy_loss: Tensor | float = 0.0
             prog_combined_loss: Tensor | float = 0.0
-
+            
+            alpha: float = self.recurrent_config.prog_alpha
             if alpha != 1:
                 outputs, _ = self.model_host.recurrent_forward(batch_input, recurrent_iterations)
                 total_value_loss, total_policy_loss, total_combined_loss = self._calculate_loss(
-                    outputs, targets, batch_size,
-                    policy_loss_function, value_loss_function, normalize_policy)
+                    outputs, targets, batch_size)
 
             if alpha != 0:
                 outputs = self._get_output_for_prog_loss(batch_input, recurrent_iterations)
                 prog_value_loss, prog_policy_loss, prog_combined_loss = self._calculate_loss(
-                    outputs, targets, batch_size,
-                    policy_loss_function, value_loss_function, normalize_policy)
+                    outputs, targets, batch_size)
 
             value_loss = (1 - alpha) * total_value_loss + alpha * prog_value_loss
             policy_loss = (1 - alpha) * total_policy_loss + alpha * prog_policy_loss
@@ -239,8 +247,7 @@ class NetworkTrainer:
         else:
             outputs, _ = self.model_host.recurrent_forward(batch_input, recurrent_iterations)
             value_loss, policy_loss, combined_loss = self._calculate_loss(
-                outputs, targets, batch_size,
-                policy_loss_function, value_loss_function, normalize_policy)
+                outputs, targets, batch_size)
 
         return value_loss, policy_loss, combined_loss
 
@@ -248,11 +255,9 @@ class NetworkTrainer:
         self,
         outputs: tuple[Tensor, Tensor],
         targets: tuple[Any, ...],
-        batch_size: int,
-        policy_loss_function: LossFunction,
-        value_loss_function: LossFunction,
-        normalize_policy: bool,
+        batch_size: int
     ) -> tuple[Tensor, Tensor, Tensor]:
+        
         target_values, target_policies = zip(*targets)
         predicted_policies, predicted_values = outputs
         device = self.model_host.device()
@@ -263,10 +268,10 @@ class NetworkTrainer:
         predicted_policies_flat = predicted_policies.view(batch_size, -1)
         predicted_values_flat = predicted_values.reshape(-1)
 
-        policy_loss: Tensor = policy_loss_function(predicted_policies_flat, target_policies_t)
-        value_loss: Tensor = value_loss_function(predicted_values_flat, target_values_t)
+        policy_loss: Tensor = self.policy_loss_function(predicted_policies_flat, target_policies_t)
+        value_loss: Tensor = self.value_loss_function(predicted_values_flat, target_values_t)
 
-        if normalize_policy and len(targets) > 1:
+        if self.normalize_policy and len(targets) > 1:
             policy_loss = policy_loss / math.log(len(targets))
 
         combined_loss = policy_loss + value_loss

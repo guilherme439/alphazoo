@@ -13,7 +13,7 @@ from pettingzoo.classic import tictactoe_v3
 
 from alphazoo.configs.alphazoo_config import AlphaZooConfig
 from alphazoo.networks import AlphaZooRecurrentNet
-from alphazoo.training.alphazoo import AlphaZoo
+from alphazoo import AlphaZoo
 
 
 class TicTacToeRecurrentNet(AlphaZooRecurrentNet):

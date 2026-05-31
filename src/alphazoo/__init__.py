@@ -11,7 +11,7 @@ logger = logging.getLogger("alphazoo")
 logger.addHandler(logging.StreamHandler(sys.stdout))
 logger.setLevel(logging.INFO)
 
-from .training.alphazoo import AlphaZoo
+from .alphazoo import AlphaZoo
 from .training.gamer import Gamer
 from .training.replay_buffer import ReplayBuffer
 from .training.game_record import GameRecord

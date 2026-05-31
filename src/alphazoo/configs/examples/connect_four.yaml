@@ -29,6 +29,7 @@ learning:
     window_size: 10000
     leak_chance: 0.0
     reanalyse:
+      enabled: true
       num_workers: 1
       positions_per_step: 32
       min_buffer_fill_ratio: 0.5

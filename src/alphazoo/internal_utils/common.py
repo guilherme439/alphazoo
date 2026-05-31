@@ -10,6 +10,8 @@ from torch import Tensor, nn
 from torch.optim import SGD, Adam, Optimizer
 from torch.optim.lr_scheduler import LRScheduler, MultiStepLR
 
+from alphazoo.configs.alphazoo_config import OptimizerConfig, SchedulerConfig
+
 from ..ialphazoo_game import IAlphazooGame
 from ..inference.caches.keyless_cache import KeylessCache
 from ..inference.ipc import IpcInferenceClient
@@ -49,35 +51,24 @@ def get_value_loss_fn(choice: str) -> LossFunction:
             raise ValueError(f"Unknown value loss: {choice}")
 
 
-def create_optimizer(
-    model: torch.nn.Module,
-    optimizer_name: str,
-    learning_rate: float,
-    weight_decay: float = 1.0e-7,
-    momentum: float = 0.9,
-    nesterov: bool = False,
-) -> Optimizer:
-    if optimizer_name == "Adam":
+def create_optimizer(model: torch.nn.Module, learning_rate: float, config: OptimizerConfig) -> Optimizer:
+    if config.optimizer_choice == "Adam":
         return Adam(model.parameters(), lr=learning_rate)
-    elif optimizer_name == "SGD":
+    elif config.optimizer_choice == "SGD":
         return SGD(
             model.parameters(),
             lr=learning_rate,
-            momentum=momentum,
-            weight_decay=weight_decay,
-            nesterov=nesterov,
+            momentum=config.sgd.momentum,
+            weight_decay=config.sgd.weight_decay,
+            nesterov=config.sgd.nesterov
         )
     else:
         print("Bad optimizer config.\nUsing default optimizer (Adam)...")
         return Adam(model.parameters(), lr=learning_rate)
 
 
-def create_scheduler(
-    optimizer: Optimizer,
-    boundaries: list[int],
-    gamma: float,
-) -> LRScheduler:
-    return MultiStepLR(optimizer, milestones=boundaries, gamma=gamma)
+def create_scheduler(optimizer: Optimizer, config: SchedulerConfig) -> LRScheduler:
+    return MultiStepLR(optimizer, milestones=config.boundaries, gamma=config.gamma)
 
 
 def sync_optimizer_lr(optimizer: Optimizer, scheduler: LRScheduler) -> None:
