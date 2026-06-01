@@ -12,7 +12,6 @@ import torch
 
 from alphazoo.configs.alphazoo_config import ReplayBufferConfig
 
-from ..ialphazoo_game import IAlphazooGame
 from .game_record import GameRecord
 
 if TYPE_CHECKING:
@@ -28,7 +27,7 @@ class BufferEntry:
     policy: torch.Tensor
     count: int
     last_update: int
-    game_snapshot: Optional[IAlphazooGame] = None
+    game_snapshot: Optional[bytes] = None
 
 
 class ReplayBuffer:
@@ -144,7 +143,7 @@ class ReplayBuffer:
         value: float,
         policy: torch.Tensor,
         iteration: int,
-        game_snapshot: IAlphazooGame | None,
+        game_snapshot: Optional[bytes],
     ) -> None:
         self._total_positions_seen += 1
         key = self.hash_key(state)

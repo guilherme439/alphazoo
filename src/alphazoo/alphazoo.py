@@ -5,7 +5,7 @@ import os
 import time
 from copy import deepcopy
 from datetime import datetime
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 import ray
 from pettingzoo.utils.env import AECEnv
 from ray.actor import ActorHandle
@@ -18,7 +18,7 @@ from .configs.search_config import SearchConfig
 from .ialphazoo_game import IAlphazooGame
 from .inference.ipc import IpcInferenceClient, IpcInferenceServer
 from .internal_utils.common import (
-    create_optimizer, create_scheduler, game_serializer_register_fn_provider,
+    create_optimizer, create_scheduler,
     sync_optimizer_lr, distribute_clients, drain_actor_pool_results)
 from .internal_utils.progress import Spinner
 from .metrics import MetricsRecorder, MetricsStore
@@ -26,6 +26,7 @@ from .networks.interfaces import AlphaZooNet, AlphaZooRecurrentNet
 from .networks.model_host import ModelHost
 from .profiling import Profiler
 from .wrappers.pettingzoo_wrapper import PettingZooWrapper
+from .training.game_encoder import GameEncoder
 from .training.game_record import GameRecord
 from .training.gamer import Gamer
 from .training.network_trainer import NetworkTrainer
@@ -192,7 +193,7 @@ class AlphaZoo:
             self._log_training_run_info(running_config, cache_config)
 
             self.current_step = self.starting_step
-            steps_to_run = range(self.starting_step + 1, training_steps + 1) # 1 indexed instead of 0 indexed
+            steps_to_run = range(self.starting_step, training_steps) # 0-indexed
             for step in steps_to_run:
                 self.current_step = step
                 logger.info(f"\nStarting step {step}/{training_steps}\n")
@@ -275,8 +276,8 @@ class AlphaZoo:
         self._reanalyse_enabled: bool = reanalyse_config.enabled
         num_reanalysers: int = reanalyse_config.num_workers if self._reanalyse_enabled else 0
         threads_per_reanalyser: int = reanalyse_config.search.simulation.effective_search_threads
-        
-        self._register_game_serializer()
+
+        self._build_game_encoder(reanalyse_config)
 
         total_clients = num_gamers * threads_per_gamer + num_reanalysers * threads_per_reanalyser
         self._start_inference_server(total_clients, cache_config, recurrent_config)
@@ -321,12 +322,10 @@ class AlphaZoo:
         )
         self._server_future = self._inference_server.run.remote()
 
-    def _register_game_serializer(self) -> None:
-        # if looks complicated but this is just creating the function that registers the serializers and calling it
-        self._register_serializer_fn: Optional[Callable] = None
+    def _build_game_encoder(self, reanalyse_config: ReanalyseConfig) -> None:
+        self._game_encoder: Optional[GameEncoder] = None
         if self._reanalyse_enabled:
-            self._register_serializer_fn = game_serializer_register_fn_provider(type(self.game))
-            self._register_serializer_fn()
+            self._game_encoder = GameEncoder(type(self.game), reanalyse_config.compress_games)
 
     def _create_gamers(
         self,
@@ -340,8 +339,7 @@ class AlphaZoo:
                 search_config,
                 self.config.data.player_dependent_value,
                 clients,
-                self._reanalyse_enabled,
-                self._register_serializer_fn,
+                self._game_encoder,
             )
             gamers.append(gamer)
         return gamers
@@ -357,7 +355,7 @@ class AlphaZoo:
                 search_config,
                 self.config.data.player_dependent_value,
                 clients,
-                self._register_serializer_fn,
+                self._game_encoder,
             )
             reanalysers.append(reanalyser)
         return reanalysers
@@ -497,7 +495,7 @@ class AlphaZoo:
         else:
             logger.info("-GPU: not available, using CPU.")
         if self.starting_step != 0:
-            logger.info("-Starting from iteration " + str(self.starting_step + 1) + ".\n")
+            logger.info("-Starting from iteration " + str(self.starting_step) + ".\n")
 
         logger.info("\n\n--------------------------------\n")
 

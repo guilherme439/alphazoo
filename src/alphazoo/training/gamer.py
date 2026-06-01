@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from queue import Empty, Queue
-from typing import Callable, Optional
+from typing import Optional
 
 import ray
 
@@ -12,6 +12,7 @@ from ..inference.ipc import IpcInferenceClient
 from ..metrics import MetricsRecorder
 from ..search.explorer import Explorer
 from ..search.mcts.node import Node
+from .game_encoder import GameEncoder
 from .game_record import GameRecord
 
 
@@ -35,17 +36,13 @@ class Gamer:
         search_config: SearchConfig,
         player_dependent_value: bool,
         inference_clients: list[IpcInferenceClient],
-        reanalyse_enabled: bool = False,
-        register_serializer_fn: Optional[Callable[[], None]] = None,
+        game_encoder: Optional[GameEncoder] = None,
     ) -> None:
-        if reanalyse_enabled:
-            register_serializer_fn()
-
         self.game = game
         self.search_config = search_config
         self.player_dependent_value = player_dependent_value
         self.inference_clients = inference_clients
-        self.reanalyse_enabled = reanalyse_enabled
+        self._game_encoder = game_encoder
 
         for client in self.inference_clients:
             client.connect()
@@ -105,7 +102,7 @@ class Gamer:
         record = GameRecord(
             num_actions,
             self.player_dependent_value,
-            store_games=self.reanalyse_enabled,
+            game_encoder=self._game_encoder,
         )
 
         move_count = 0

@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable
 
-import ray
 from ray.util import ActorPool
 import torch
 from torch import Tensor, nn
@@ -12,7 +11,6 @@ from torch.optim.lr_scheduler import LRScheduler, MultiStepLR
 
 from alphazoo.configs.alphazoo_config import OptimizerConfig, SchedulerConfig
 
-from ..ialphazoo_game import IAlphazooGame
 from ..inference.caches.keyless_cache import KeylessCache
 from ..inference.ipc import IpcInferenceClient
 from .loss_functions import AbsoluteError, KLDivergence, MSError, SquaredError
@@ -79,23 +77,6 @@ def sync_optimizer_lr(optimizer: Optimizer, scheduler: LRScheduler) -> None:
 
 def check_interval(step: int, interval: int) -> bool:
     return interval > 0 and step > 0 and step % interval == 0
-
-
-def game_serializer_register_fn_provider(
-    game_class: type[IAlphazooGame],
-) -> Callable[[], None]:
-    """
-    Return a function that registers ``game_class.serialize`` and ``game_class.deserialize``
-    as the functions Ray should use to (de)serialize games.
-    Must be called in every actor process that pickles or unpickles instances of ``game_class``.
-    """
-    def register() -> None:
-        ray.util.register_serializer(
-            game_class,
-            serializer=lambda game: game_class.serialize(game),
-            deserializer=lambda data: game_class.deserialize(data),
-        )
-    return register
 
 
 def distribute_clients(

@@ -63,6 +63,7 @@ AlphaZooConfig
 │   │       ├── num_workers
 │   │       ├── positions_per_step
 │   │       ├── min_buffer_fill_ratio
+│   │       ├── compress_games
 │   │       └── search: SearchConfig
 │   ├── value_loss
 │   ├── policy_loss
@@ -243,11 +244,12 @@ Re-runs MCTS on positions already in the buffer using the current network, refre
 | `num_workers` | `int` | `0` | Number of parallel reanalyse workers. `0` disables reanalyse entirely. |
 | `positions_per_step` | `int` | `0` | Number of oldest entries dispatched to the reanalyser pool per training step. |
 | `min_buffer_fill_ratio` | `float` | `0.5` | Skip reanalyse until `len(buffer) / window_size` reaches this threshold. |
+| `compress_games` | `bool` | `false` | zlib-compress each stored game snapshot, trading (de)compression CPU on save and reanalyse for lower replay-buffer memory. No effect unless reanalyse is enabled. |
 | `search` | `SearchConfig` | inherits from top-level `search` | MCTS search config for reanalyse |
 
 The `search` block uses the top-level `search` as the base and overrides it with any values defined here. This is usefull to reanalyse games with a slightly modified search (for example: using a larger simulation count)
 
-Enabling reanalyse stores a game snapshot per unique buffer entry — memory scales linearly with `window_size`.
+Enabling reanalyse stores a game snapshot per unique buffer entry, kept as serialized `bytes` (set `compress_games` to additionally zlib-compress them). Buffer memory scales linearly with `window_size`.
 
 ### Samples
 

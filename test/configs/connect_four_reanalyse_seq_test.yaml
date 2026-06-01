@@ -18,9 +18,11 @@ learning:
     window_size: 500
     leak_chance: 0.0
     reanalyse:
+      enabled: true
       num_workers: 2
       positions_per_step: 8
       min_buffer_fill_ratio: 0.25
+      compress_games: true
       search:
         simulation:
           mcts_simulations: 16

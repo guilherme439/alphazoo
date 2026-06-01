@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Callable
 
 import ray
 import torch
@@ -12,6 +11,7 @@ from ..inference.ipc import IpcInferenceClient
 from ..search.explorer import Explorer
 from ..search.mcts.node import Node
 from ..ialphazoo_game import IAlphazooGame
+from .game_encoder import GameEncoder
 from .replay_buffer import BufferEntry
 from .targets import policy_from_root_visits
 
@@ -39,13 +39,12 @@ class Reanalyser:
         search_config: SearchConfig,
         player_dependent_value: bool,
         inference_clients: list[IpcInferenceClient],
-        register_serializer_fn: Callable[[], None],
+        game_encoder: GameEncoder,
     ) -> None:
-        register_serializer_fn()
-
         self.search_config = search_config
         self.player_dependent_value = player_dependent_value
         self.inference_clients = inference_clients
+        self._game_encoder = game_encoder
 
         for client in self.inference_clients:
             client.connect()
@@ -60,8 +59,8 @@ class Reanalyser:
         return os.getpid()
 
     def process(self, request: ReanalyseRequest) -> ReanalyseResult:
-        game: IAlphazooGame = request.entry.game_snapshot
-        
+        game: IAlphazooGame = self._game_encoder.decode(request.entry.game_snapshot)
+
         root_node = Node(0)
         self.explorer.run_alphazero_mcts(
             game,

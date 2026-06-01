@@ -68,6 +68,7 @@ class ReanalyseConfig:
     num_workers: int = 1
     positions_per_step: int = 1
     min_buffer_fill_ratio: float = 0.5
+    compress_games: bool = False
     search: SearchConfig = field(default_factory=SearchConfig)
 
 
