@@ -55,7 +55,7 @@ class KeylessCache(Cache):
         self._index_mask = self.size - 1
 
         self._generation: int = 0
-        self._slot_generations: list[int] = [0] * self.size
+        self._slot_generations: list[int] = [-1] * self.size
         self.fingerprints: list[int] = [0] * self.size
         self.values: list[Any] = [None] * self.size
 
@@ -130,6 +130,9 @@ class KeylessCache(Cache):
 
     def length(self) -> int:
         return self.num_items
+
+    def capacity(self) -> int:
+        return self.size
 
     def get_fill_ratio(self) -> float:
         return self.num_items / self.size

@@ -495,7 +495,8 @@ class AlphaZoo:
             )
 
         if cache_config.enabled:
-            logger.info("-Using cache for inference results.")
+            cache_size = ray.get(self._inference_server.get_cache_size.remote())
+            logger.info(f"-Using cache for inference results (size: {cache_size}).")
         if self.training_host.device().startswith("cuda"):
             logger.info("-GPU: " + self.training_host.device_name())
         else:

@@ -33,9 +33,14 @@ class Cache(ABC):
         ''' Invalidates all cache entries '''
         ...
 
-    @abstractmethod    
+    @abstractmethod
     def length(self) -> int:
         ''' Returns the number of items in the cache '''
+        ...
+
+    @abstractmethod
+    def capacity(self) -> int:
+        ''' Returns the maximum number of items the cache can hold '''
         ...
 
     @abstractmethod

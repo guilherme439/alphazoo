@@ -111,6 +111,9 @@ class IpcInferenceServer:
             self.recorder.scalar("inference/cache_length", float(self._cache.length()))
         return self.recorder.drain()
 
+    def get_cache_size(self) -> int:
+        return self._cache.capacity() if self._cache_enabled else 0
+
     def stop(self) -> None:
         self._stopped = True
         os.write(self._stop_w, b'\x01')
