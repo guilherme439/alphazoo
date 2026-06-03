@@ -229,10 +229,16 @@ class AlphaZoo:
                 self._log_step_metrics(public, internal)
                 logger.info("\n-------------------------------------\n\n")
 
-                if on_step_end is not None:
-                    on_step_end(self, step, public)
+                stop_requested = (
+                    on_step_end is not None
+                    and on_step_end(self, step, public) is False
+                )
 
                 self.metrics_store.clear()
+
+                if stop_requested:
+                    logger.info(f"\nStop requested; ending training after step {step}.\n")
+                    break
 
             total_run_time = time.time() - run_start
             self.recorder.lifetime_scalar("time/total", total_run_time)
@@ -504,6 +510,7 @@ class AlphaZoo:
         avg_moves = public.get("rollout/episode_len_mean", 0.0)
         tree_size = internal.get("rollout/tree_size", 0)
         cache_hit = public.get("inference/cache_hit_ratio", 0.0)
+        cache_fill = internal.get("inference/cache_fill_ratio", 0.0)
         replay_size = public.get("train/replay_buffer_size", 0)
         lr = public.get("train/learning_rate", 0.0)
         loss = public.get("train/combined_loss", 0.0)
@@ -512,14 +519,14 @@ class AlphaZoo:
         step_time = internal.get("time/step", 0.0)
 
         logger.info(
-            f"Games: {games} | Avg moves: {avg_moves:.1f}"
-            f" | Tree size: {tree_size:.0f} | Cache hit: {cache_hit:.2f}"
+            f"\nGames: {games} | Avg moves: {avg_moves:.1f} | Tree size: {tree_size:.0f}"
         )
         logger.info(
-            f"Replay buffer: {replay_size} positions."
-            f" | LR: {lr:.2e} | Loss: {loss:.4f}"
+            f"Replay buffer: {replay_size} positions | LR: {lr:.2e} | Loss: {loss:.4f}\n"
         )
         logger.info(
-            f"Selfplay: {selfplay_time:.3f}s | Training: {training_time:.3f}s"
-            f" | Step: {step_time:.3f}s"
+            f"Cache - Hit ratio: {cache_hit:.2f} | Fill ratio: {cache_fill:.2f}"
+        )
+        logger.info(
+            f"Times - Selfplay: {selfplay_time:.3f}s | Training: {training_time:.3f}s | Step: {step_time:.3f}s\n"
         )

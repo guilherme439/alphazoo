@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import sys
 import threading
 import time
@@ -34,10 +33,9 @@ class Spinner:
     redrawn in place. Non-TTY emits a heartbeat log line every
     `heartbeat_sec` so piped/captured runs still show liveness.
 
-    When `max_duration` is provided the spinner expresses "ripening": the
-    frame color shifts red → yellow → green and the tick interval speeds
-    up as `elapsed / max_duration` grows. With `max_duration=None`
-    the spinner stays in its neutral cadence and color (current default).
+    When `max_duration` is provided the tick interval speeds up as
+    `elapsed / max_duration` grows. With `max_duration=None` the
+    spinner stays in its neutral cadence.
 
     Driven by a background thread; no external updates needed.
     Only enabled when `alphazoo` is in verbose mode (logger at INFO level).
@@ -47,7 +45,6 @@ class Spinner:
     _DONE_FRAME = "⠿"
     _BASE_FRAME_INTERVAL = 0.1
     _MAX_FRAME_INTERVAL = 0.35
-    _ANSI_RESET = "\033[0m"
     _QUIET_PERIOD = 2.0
 
     def __init__(
@@ -61,7 +58,6 @@ class Spinner:
         self._max_duration = max_duration
         self._heartbeat_sec = heartbeat_sec
         self._is_tty = sys.stdout.isatty()
-        self._use_color = self._is_tty and os.environ.get("NO_COLOR") is None
         self._enabled = logger.isEnabledFor(logging.INFO)
         self._start_time: Optional[float] = None
         self._stop_event = threading.Event()
@@ -101,9 +97,7 @@ class Spinner:
             self._restore_guards()
             if interrupted and ext_last_char != "\n":
                 sys.stdout.write("\n")
-            color = self._color_code()
-            reset = self._ANSI_RESET if color else ""
-            line = f"{color}{self._DONE_FRAME} {self.description}{reset}"
+            line = f"{self._DONE_FRAME} {self.description}"
             sys.stdout.write("\r" + line + "   \n")
             sys.stdout.flush()
         else:
@@ -128,9 +122,7 @@ class Spinner:
 
     def _tty_render(self) -> None:
         frame = self._FRAMES[self._frame_idx]
-        color = self._color_code()
-        reset = self._ANSI_RESET if color else ""
-        line = f"{color}{frame} {self.description}{reset}"
+        line = f"{frame} {self.description}"
         with self._lock:
             self._do_internal_write("\r" + line + "   ")
             sys.stdout.flush()
@@ -200,20 +192,3 @@ class Spinner:
             return self._BASE_FRAME_INTERVAL
         t = self._patience_t()
         return self._MAX_FRAME_INTERVAL + t * (self._BASE_FRAME_INTERVAL - self._MAX_FRAME_INTERVAL)
-
-    def _color_code(self) -> str:
-        if not self._use_color or self._max_duration is None:
-            return ""
-        t = self._patience_t()
-        # Two-segment lerp through yellow: red (220,50,50) → yellow (220,200,30) → green (50,200,80)
-        if t < 0.5:
-            u = t * 2
-            r = 220
-            g = int(50 + u * (200 - 50))
-            b = int(50 + u * (30 - 50))
-        else:
-            u = (t - 0.5) * 2
-            r = int(220 + u * (50 - 220))
-            g = 200
-            b = int(30 + u * (80 - 30))
-        return f"\033[38;2;{r};{g};{b}m"

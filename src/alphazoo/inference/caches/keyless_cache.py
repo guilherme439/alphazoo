@@ -68,19 +68,6 @@ class KeylessCache(Cache):
         self._rlocks = [lk.gen_rlock() for lk in self._rw_locks]
         self._wlocks = [lk.gen_wlock() for lk in self._rw_locks]
 
-    def _is_occupied(self, index: int) -> bool:
-        return self._slot_generations[index] == self._generation
-
-    def _hash_tensor(self, tensor: torch.Tensor) -> int:
-        raw = hashlib.blake2b(tensor.numpy().tobytes(), digest_size=self._digest_bytes).digest()
-        return int.from_bytes(raw, "little")
-
-    def _extract_index(self, h: int) -> int:
-        return h & self._index_mask
-
-    def _extract_fingerprint(self, h: int) -> int:
-        return h >> self._index_bits
-
     def get(self, key: torch.Tensor) -> Optional[Any]:
         h = self._hash_tensor(key)
         index = self._extract_index(h)
@@ -150,6 +137,19 @@ class KeylessCache(Cache):
     def get_hit_ratio(self) -> float:
         total = self.hits + self.misses
         return self.hits / total if total > 0 else 0.0
+    
+    def _is_occupied(self, index: int) -> bool:
+        return self._slot_generations[index] == self._generation
+
+    def _hash_tensor(self, tensor: torch.Tensor) -> int:
+        raw = hashlib.blake2b(tensor.numpy().tobytes(), digest_size=self._digest_bytes).digest()
+        return int.from_bytes(raw, "little")
+
+    def _extract_index(self, h: int) -> int:
+        return h & self._index_mask
+
+    def _extract_fingerprint(self, h: int) -> int:
+        return h >> self._index_bits
 
     def _floor_power_of_2(self, n: int) -> int:
         # If n is already a power of 2, n & (n-1) == 0 (only one bit set)

@@ -135,6 +135,17 @@ Public metrics (available in callback):
 
 Use this callback for checkpointing, logging, or early stopping.
 
+### Early stopping
+
+The return value of `on_step_end` is used a convention to request early shutdown.
+Return `False` from `on_step_end` to stop training after the current step. The loop exits cleanly and runs the normal graceful shutdown. Any other return value continues training.
+
+```python
+def on_step_end(az, step, metrics):
+    if some_condition:
+        return False  # stop after the current step
+```
+
 ---
 
 ## Resuming training

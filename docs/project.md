@@ -15,6 +15,8 @@ trainer = AlphaZoo(env=pettingzoo_aec_env, config=config, model=my_net)
 trainer.train(on_step_end=callback)
 ```
 
+`on_step_end(az, step, public_metrics)` is called after each step; returning `False` stops training after the current step (clean exit + graceful shutdown), any other value continues.
+
 The model must subclass either `AlphaZooNet` or `AlphaZooRecurrentNet` (both from `alphazoo.networks`):
 - **`AlphaZooNet`**: standard network. `forward(x) -> (policy_logits, value_estimate)`.
 - **`AlphaZooRecurrentNet`**: recurrent network. `forward(x, iters_to_do, interim_thought=None) -> ((policy_logits, value_estimate), interim_thought)`. Requires a `RecurrentConfig` in `AlphaZooConfig`.

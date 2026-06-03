@@ -107,6 +107,7 @@ class IpcInferenceServer:
     def get_metrics(self) -> dict:
         if self._cache_enabled:
             self.recorder.scalar("inference/cache_hit_ratio", self._cache.get_hit_ratio())
+            self.recorder.scalar("inference/cache_fill_ratio", self._cache.get_fill_ratio())
             self.recorder.scalar("inference/cache_length", float(self._cache.length()))
         return self.recorder.drain()
 
