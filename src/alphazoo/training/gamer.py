@@ -136,8 +136,7 @@ class Gamer:
 
         self.metrics_recorder.scalar("rollout/final_tree_size", tree_size)
         self.metrics_recorder.scalar("rollout/final_bias", root_bias)
-        self.metrics_recorder.counter("rollout/moves", move_count)
-        self.metrics_recorder.counter("rollout/games", 1)
+        self.metrics_recorder.mean("rollout/episode_len_mean", move_count)
 
         terminal_value = game.get_terminal_value()
         if self.player_dependent_value and game.get_current_player() != 1:

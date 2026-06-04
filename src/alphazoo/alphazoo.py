@@ -122,7 +122,6 @@ class AlphaZoo:
         self.recorder = MetricsRecorder()
         self.metrics_store = MetricsStore(public_keys={
             "step",
-            "rollout/moves",
             "rollout/games",
             "rollout/episode_len_mean",
             "train/value_loss",
@@ -206,9 +205,9 @@ class AlphaZoo:
                     )
 
                 if running_mode == "sequential":
-                    self._run_selfplay(running_config.sequential)
+                    games_this_step = self._run_selfplay(running_config.sequential)
                 elif running_mode == "asynchronous":
-                    self._wait_for_selfplay(running_config.asynchronous)
+                    games_this_step = self._wait_for_selfplay(running_config.asynchronous)
 
                 train_start = time.time()
                 self.trainer.run_training_step()
@@ -219,6 +218,7 @@ class AlphaZoo:
                 # because new model will invalidate cache and clear its metrics
                 public, internal = self._collect_step_metrics(
                     step,
+                    games_this_step,
                     train_start - step_start,
                     step_end - train_start,
                     step_end - step_start,
@@ -229,10 +229,9 @@ class AlphaZoo:
                 self._log_step_metrics(public, internal)
                 logger.info("\n-------------------------------------\n\n")
 
-                stop_requested = (
-                    on_step_end is not None
-                    and on_step_end(self, step, public) is False
-                )
+                if on_step_end is not None:
+                    callback_return = on_step_end(self, step, public)
+                    stop_requested = callback_return is False
 
                 self.metrics_store.clear()
 
@@ -366,30 +365,36 @@ class AlphaZoo:
             reanalysers.append(reanalyser)
         return reanalysers
 
-    def _wait_for_selfplay(self, config: AsynchronousConfig) -> None:
+    def _wait_for_selfplay(self, config: AsynchronousConfig) -> int:
         deadline = time.time() + config.update_delay
-        poll_interval = 0.2
+        poll_interval = 0.1
         games_played = 0
 
         with Spinner("Waiting for selfplay ", max_duration=config.update_delay):
             while time.time() < deadline:
                 games_played += self._collect_completed_games()
                 if config.min_num_games is not None and games_played >= config.min_num_games:
-                    return
+                    return games_played
                 time.sleep(poll_interval)
 
-    def _run_selfplay(self, config: SequentialConfig) -> None:
+        return games_played
+
+    def _run_selfplay(self, config: SequentialConfig) -> int:
         num_games_per_task = 1
 
         pool = ActorPool(self._gamers)
         for _ in range(config.num_games_per_step):
             pool.submit(lambda gamer, _: gamer.play_games.remote(num_games_per_task), None)
 
+        games_played = 0
         with Spinner(f"Self-play "):
             while pool.has_next():
                 records: list[GameRecord] = pool.get_next_unordered()
                 for record in records:
                     self.replay_buffer.save_game_record(record, self.current_step)
+                    games_played += 1
+
+        return games_played
 
     def _run_reanalyse(self, positions_per_step: int, min_buffer_fill_ratio: float) -> None:
         # results from previous iterations
@@ -429,6 +434,7 @@ class AlphaZoo:
     def _collect_step_metrics(
         self,
         step: int,
+        games_this_step: int,
         selfplay_time: float,
         training_time: float,
         step_time: float,
@@ -442,6 +448,7 @@ class AlphaZoo:
         remote_metrics = ray.get(futures)
 
         self.recorder.scalar("step", step)
+        self.recorder.scalar("rollout/games", games_this_step)
         self.recorder.scalar("train/replay_buffer_size", len(self.replay_buffer))
         self.recorder.scalar("train/replay_buffer_duplicate_rate", self.replay_buffer.duplicate_rate())
         self.recorder.scalar("train/learning_rate", self.scheduler.get_last_lr()[0])
@@ -455,11 +462,6 @@ class AlphaZoo:
             self._get_metrics(),
         ]
         self.metrics_store.ingest(remote_metrics + local_metrics)
-
-        metrics = self.metrics_store.get_all()
-        moves = metrics.get("rollout/moves", 0)
-        games = metrics.get("rollout/games", 0)
-        self.metrics_store.add("rollout/episode_len_mean", moves / games if games > 0 else 0.0)
 
         return self.metrics_store.get_public(), self.metrics_store.get_internal()
 
@@ -520,14 +522,15 @@ class AlphaZoo:
         step_time = internal.get("time/step", 0.0)
 
         logger.info(
+            f"\nLR: {lr:.2e} | Loss: {loss:.4f}"
+        )
+        logger.info(
+            f"\nReplay buffer: {replay_size} positions"
             f"\nGames: {games} | Avg moves: {avg_moves:.1f} | Tree size: {tree_size:.0f}"
         )
         logger.info(
-            f"Replay buffer: {replay_size} positions | LR: {lr:.2e} | Loss: {loss:.4f}\n"
+            f"\nCache - Hit ratio: {cache_hit:.2f} | Fill ratio: {cache_fill:.2f}"
         )
         logger.info(
-            f"Cache - Hit ratio: {cache_hit:.2f} | Fill ratio: {cache_fill:.2f}"
-        )
-        logger.info(
-            f"Times - Selfplay: {selfplay_time:.3f}s | Training: {training_time:.3f}s | Step: {step_time:.3f}s\n"
+            f"\nTimes - Selfplay: {selfplay_time:.3f}s | Training: {training_time:.3f}s | Step: {step_time:.3f}s\n"
         )
