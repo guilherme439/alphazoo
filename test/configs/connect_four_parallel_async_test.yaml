@@ -29,7 +29,7 @@ learning:
     late_heavy: true
 
 optimizer:
-  optimizer_choice: "SGD"
+  type: "SGD"
   sgd:
     weight_decay: 0.0001
     momentum: 0.9

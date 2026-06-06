@@ -90,12 +90,12 @@ class AlphaZoo:
             sync_optimizer_lr(self.optimizer, self.scheduler)
 
         self.trainer = NetworkTrainer(
-            self.training_host, 
-            self.optimizer, 
-            self.scheduler, 
-            self.replay_buffer, 
+            self.training_host,
+            self.optimizer,
+            self.scheduler,
+            self.replay_buffer,
             self.config.learning,
-            self.config.recurrent if is_recurrent_model else None
+            self.config.recurrent if is_recurrent_model else None,
         )
 
 

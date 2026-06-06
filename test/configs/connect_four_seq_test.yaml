@@ -30,7 +30,7 @@ learning:
     late_heavy: false
 
 optimizer:
-  optimizer_choice: "Adam"
+  type: "Adam"
   sgd:
     weight_decay: 0.0001
     momentum: 0.9

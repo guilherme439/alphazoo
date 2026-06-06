@@ -183,7 +183,6 @@ class NetworkTrainer:
         return [p / total_sum for p in probs]
     
     def _batch_update_weights(self, batch: list[Any]) -> tuple[float, float, float]:
-        
         self.optimizer.zero_grad()
 
         value_loss: Tensor | float = 0.0
@@ -198,6 +197,8 @@ class NetworkTrainer:
         loss = combined_loss
 
         loss.backward()  # type: ignore[union-attr]
+        if self.config.gradient_clip is not None:
+            torch.nn.utils.clip_grad_norm_(self.model_host.model.parameters(), self.config.gradient_clip)
         self.optimizer.step()
         self.scheduler.step()
 

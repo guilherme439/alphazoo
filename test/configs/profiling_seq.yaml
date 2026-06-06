@@ -32,7 +32,7 @@ learning:
     num_samples: 32
     late_heavy: true
 optimizer:
-  optimizer_choice: "Adam"
+  type: "Adam"
 scheduler:
   type: step
   starting_lr: 0.001

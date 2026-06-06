@@ -20,7 +20,7 @@ logger = logging.getLogger("alphazoo")
 
 
 def create_optimizer(model: torch.nn.Module, learning_rate: float, config: OptimizerConfig) -> Optimizer:
-    match config.optimizer_choice:
+    match config.type:
         case "Adam":
             return Adam(model.parameters(), lr=learning_rate)
         case "SGD":
@@ -32,7 +32,7 @@ def create_optimizer(model: torch.nn.Module, learning_rate: float, config: Optim
                 nesterov=config.sgd.nesterov,
             )
         case _:
-            raise ValueError(f"Unknown optimizer choice: {config.optimizer_choice}")
+            raise ValueError(f"Unknown optimizer type: {config.type}")
 
 
 def create_scheduler(optimizer: Optimizer, config: BaseSchedulerConfig) -> LRScheduler:

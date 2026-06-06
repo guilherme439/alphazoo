@@ -49,7 +49,7 @@ learning:
     learning_epochs: 1
 
 optimizer:
-  optimizer_choice: "Adam"
+  type: "Adam"
   sgd:
     weight_decay: 0.0000001
     momentum: 0.9

@@ -84,6 +84,7 @@ class LearningConfig:
     value_loss: Literal["SE", "AE"] = "SE"
     policy_loss: Literal["CE", "KLD", "MSE"] = "CE"
     normalize_ce: bool = False
+    gradient_clip: Optional[float] = None
     learning_method: Literal["samples", "epochs"] = "samples"
     samples: SamplesConfig = field(default_factory=SamplesConfig)
     epochs: EpochsConfig = field(default_factory=EpochsConfig)
@@ -98,7 +99,7 @@ class SGDConfig:
 
 @dataclass
 class OptimizerConfig:
-    optimizer_choice: Literal["Adam", "SGD"] = "Adam"
+    type: Literal["Adam", "SGD"] = "Adam"
     sgd: SGDConfig = field(default_factory=SGDConfig)
 
 

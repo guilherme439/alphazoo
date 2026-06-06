@@ -68,6 +68,7 @@ AlphaZooConfig
 │   ├── value_loss
 │   ├── policy_loss
 │   ├── normalize_ce
+│   ├── gradient_clip
 │   ├── learning_method
 │   ├── samples: SamplesConfig
 │   │   ├── batch_size
@@ -77,7 +78,7 @@ AlphaZooConfig
 │       ├── batch_size
 │       └── learning_epochs
 ├── optimizer: OptimizerConfig
-│   ├── optimizer_choice
+│   ├── type
 │   └── sgd: SGDConfig
 │       ├── weight_decay
 │       ├── momentum
@@ -225,6 +226,7 @@ The configured `batch_size` is automatically reduced when it would otherwise be 
 | `value_loss` | `"SE"` \| `"AE"` | `"SE"` | Value head loss function. `SE` = squared error, `AE` = absolute error. |
 | `policy_loss` | `"CE"` \| `"KLD"` \| `"MSE"` | `"CE"` | Policy head loss function. `CE` = cross-entropy, `KLD` = KL divergence, `MSE` = mean squared error. |
 | `normalize_ce` | `bool` | `false` | Normalize cross-entropy loss by the entropy of the target distribution. |
+| `gradient_clip` | `float` \| `null` | `null` | When set, clip the gradient L2 norm to this value (via `clip_grad_norm_`) before each optimizer step; `null` disables clipping. |
 | `learning_method` | `"samples"` \| `"epochs"` | `"samples"` | How training data is drawn from the replay buffer each step. |
 
 ### Replay Buffer
@@ -278,11 +280,11 @@ Used when `learning_method` is `"epochs"`. Iterates over the entire replay buffe
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `optimizer_choice` | `"Adam"` \| `"SGD"` | `"Adam"` | Which optimizer to use. Adam uses default PyTorch settings. SGD settings are configured below. |
+| `type` | `"Adam"` \| `"SGD"` | `"Adam"` | Which optimizer to use. Adam uses default PyTorch settings. SGD settings are configured below. |
 
 ### SGD
 
-Only used when `optimizer_choice` is `"SGD"`.
+Only used when `type` is `"SGD"`.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
