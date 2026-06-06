@@ -24,6 +24,8 @@ dependencies = [
     "scipy~=1.15",
     "readerwriterlock~=1.0",
     "omegaconf>=2.4.0.dev0",
+    "pydantic~=2.11",
+    "matplotlib~=3.10",
 ]
 
 [project.urls]

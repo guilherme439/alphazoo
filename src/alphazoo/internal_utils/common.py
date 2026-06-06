@@ -4,10 +4,6 @@ from typing import Any, Callable
 from ray.util import ActorPool
 import torch
 from torch import Tensor, nn
-from torch.optim import SGD, Adam, Optimizer
-from torch.optim.lr_scheduler import LRScheduler, MultiStepLR
-
-from alphazoo.configs.alphazoo_config import OptimizerConfig, SchedulerConfig
 
 from ..inference.caches.keyless_cache import KeylessCache
 from ..inference.ipc import IpcInferenceClient
@@ -45,32 +41,6 @@ def get_value_loss_fn(choice: str) -> LossFunction:
             return AbsoluteError
         case _:
             raise ValueError(f"Unknown value loss: {choice}")
-
-
-def create_optimizer(model: torch.nn.Module, learning_rate: float, config: OptimizerConfig) -> Optimizer:
-    if config.optimizer_choice == "Adam":
-        return Adam(model.parameters(), lr=learning_rate)
-    elif config.optimizer_choice == "SGD":
-        return SGD(
-            model.parameters(),
-            lr=learning_rate,
-            momentum=config.sgd.momentum,
-            weight_decay=config.sgd.weight_decay,
-            nesterov=config.sgd.nesterov
-        )
-    else:
-        print("Bad optimizer config.\nUsing default optimizer (Adam)...")
-        return Adam(model.parameters(), lr=learning_rate)
-
-
-def create_scheduler(optimizer: Optimizer, config: SchedulerConfig) -> LRScheduler:
-    return MultiStepLR(optimizer, milestones=config.boundaries, gamma=config.gamma)
-
-
-def sync_optimizer_lr(optimizer: Optimizer, scheduler: LRScheduler) -> None:
-    """Overwrite the optimizer's per-param-group lr with the scheduler's current lr."""
-    for pg, lr in zip(optimizer.param_groups, scheduler.get_last_lr()):
-        pg["lr"] = lr
 
 
 def check_interval(step: int, interval: int) -> bool:

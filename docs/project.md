@@ -123,11 +123,15 @@ AlphaZooConfig
 ├── LearningConfig (buffer size, batch extraction, loss functions)
 │   ├── player_dependent_value (bool, default True — see Value Perspective below)
 │   ├── SamplesConfig / EpochsConfig
-├── SchedulerConfig (LR schedule)
+├── SchedulerConfig (LR schedule; type-discriminated: step | linear | sin)
 ├── OptimizerConfig (Adam/SGD)
 └── SearchConfig (MCTS parameters)
     ├── SimulationConfig, UCTConfig, ExplorationConfig
 ```
+
+The scheduler config is a discriminated union: `BaseSchedulerConfig` carries `starting_lr`, and `StepSchedulerConfig` / `LinearSchedulerConfig` / `SinSchedulerConfig` add their own fields. `BaseSchedulerConfig.from_dict` resolves the variant from the `type` key with a Pydantic `TypeAdapter`, and `AlphaZooConfig.__post_init__` applies it on every construction path. `create_scheduler` (`internal_utils/optimizer.py`) match/cases the variant onto a `MultiStepLR`, `LinearLR`, or a `LambdaLR` whose multiplier is a frequency-swept sine that holds its last value once `steps_covered` is passed.
+
+When `scheduler.show_preview` is set, `AlphaZoo.train` calls `show_lr_schedule_preview(config, scheduler, starting_step)` (`internal_utils/optimizer.py`) before any actors start: it deepcopies the live scheduler, steps the copy over the run's remaining optimizer steps to record each lr, then plots them in a matplotlib window against the training iteration and blocks until it is closed. Copying the actual scheduler rather than rebuilding from config keeps the preview faithful when a checkpoint's optimizer/scheduler state was loaded or training resumes from a non-zero iteration. matplotlib is imported only inside the render call, so a normal run never loads it. The preview is available only for the `samples` learning method, where the optimizer steps per iteration (`samples.num_samples`) are known ahead of the run.
 
 Loss functions (`utils/functions/loss_functions.py`): KL divergence, cross-entropy, MSE, squared/absolute error for policy and value heads.
 

@@ -1,8 +1,9 @@
 from dataclasses import dataclass, field
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from omegaconf import OmegaConf
 
+from .scheduler_config import BaseSchedulerConfig
 from .search_config import SearchConfig
 
 
@@ -102,13 +103,6 @@ class OptimizerConfig:
 
 
 @dataclass
-class SchedulerConfig:
-    starting_lr: float = 1.0e-4
-    boundaries: list[int] = field(default_factory=lambda: [10000, 20000])
-    gamma: float = 0.2
-
-
-@dataclass
 class AlphaZooConfig:
     verbose: bool = True
     data: DataConfig = field(default_factory=DataConfig)
@@ -116,14 +110,22 @@ class AlphaZooConfig:
     cache: CacheConfig = field(default_factory=CacheConfig)
     learning: LearningConfig = field(default_factory=LearningConfig)
     recurrent: Optional[RecurrentConfig] = None
-    scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
+    scheduler: Any = None # Polymorphic - defined at runtime
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.scheduler, BaseSchedulerConfig):
+            self.scheduler = BaseSchedulerConfig.from_dict(self.scheduler or {})
+
     @classmethod
     def from_yaml(cls, path: str) -> AlphaZooConfig:
+        return cls.from_dict(OmegaConf.load(path))
+
+    @classmethod
+    def from_dict(cls, data: Any) -> AlphaZooConfig:
         schema = OmegaConf.structured(cls)
-        cfg = OmegaConf.merge(schema, OmegaConf.load(path))
+        cfg = OmegaConf.merge(schema, data)
 
         cfg.learning.replay_buffer.reanalyse.search = OmegaConf.merge(
             cfg.search,

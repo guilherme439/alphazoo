@@ -1,4 +1,11 @@
 from .search_config import SearchConfig, SimulationConfig, UCTConfig, ExplorationConfig
+from .scheduler_config import (
+    BaseSchedulerConfig,
+    StepSchedulerConfig,
+    LinearSchedulerConfig,
+    SinSchedulerConfig,
+    SchedulerConfig,
+)
 from .alphazoo_config import (
     AlphaZooConfig,
     RunningConfig,
@@ -9,7 +16,6 @@ from .alphazoo_config import (
     EpochsConfig,
     SamplesConfig,
     RecurrentConfig,
-    SchedulerConfig,
     OptimizerConfig,
     SGDConfig,
 )
@@ -19,6 +25,11 @@ __all__ = [
     "SimulationConfig",
     "UCTConfig",
     "ExplorationConfig",
+    "BaseSchedulerConfig",
+    "StepSchedulerConfig",
+    "LinearSchedulerConfig",
+    "SinSchedulerConfig",
+    "SchedulerConfig",
     "AlphaZooConfig",
     "RunningConfig",
     "SequentialConfig",
@@ -28,7 +39,6 @@ __all__ = [
     "EpochsConfig",
     "SamplesConfig",
     "RecurrentConfig",
-    "SchedulerConfig",
     "OptimizerConfig",
     "SGDConfig",
 ]

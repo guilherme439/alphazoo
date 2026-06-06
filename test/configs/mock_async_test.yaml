@@ -35,6 +35,7 @@ optimizer:
     nesterov: true
 
 scheduler:
+  type: step
   starting_lr: 0.001
   boundaries: [100]
   gamma: 0.1

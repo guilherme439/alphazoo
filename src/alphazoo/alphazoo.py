@@ -15,9 +15,8 @@ from .configs.alphazoo_config import AlphaZooConfig, AsynchronousConfig, CacheCo
 from .configs.search_config import SearchConfig
 from .ialphazoo_game import IAlphazooGame
 from .inference.ipc import IpcInferenceClient, IpcInferenceServer
-from .internal_utils.common import (
-    create_optimizer, create_scheduler,
-    sync_optimizer_lr, distribute_clients, drain_actor_pool_results)
+from .internal_utils.optimizer import create_optimizer, create_scheduler, show_lr_schedule_preview, sync_optimizer_lr
+from .internal_utils.common import distribute_clients, drain_actor_pool_results
 from .internal_utils.progress import Spinner
 from .metrics import MetricsRecorder, MetricsStore
 from .networks.interfaces import AlphaZooNet, AlphaZooRecurrentNet
@@ -43,7 +42,7 @@ class AlphaZoo:
         model: AlphaZooNet | AlphaZooRecurrentNet,
         optimizer_state_dict: Optional[dict] = None,
         scheduler_state_dict: Optional[dict] = None,
-        replay_buffer_state: Optional[dict] = None,
+        replay_buffer_state_dict: Optional[dict] = None,
         start_iteration: Optional[int] = None,
     ) -> None:
         """
@@ -60,30 +59,15 @@ class AlphaZoo:
         self.starting_step: int = start_iteration if start_iteration is not None else 0
 
         self.replay_buffer = ReplayBuffer(self.config.learning.replay_buffer)
-        if replay_buffer_state is not None:
-            self.replay_buffer.load(replay_buffer_state)
+        if replay_buffer_state_dict is not None:
+            self.replay_buffer.load(replay_buffer_state_dict)
 
 
         # -------------------- NETWORK SETUP ------------------- #
 
-        model_is_recurrent: bool = isinstance(model, AlphaZooRecurrentNet)
-        if model_is_recurrent and config.recurrent is None:
-            raise ValueError(
-                "A RecurrentConfig must be provided when using an AlphaZooRecurrentNet. "
-                "Add recurrent=RecurrentConfig(...) to your AlphaZooConfig."
-            )
+        is_recurrent_model = self._initialize_model(model)
 
-        self.model = model
-
-        # dummy forward pass to initialize possible lazy layers before passing the model to the hosts
-        obs = self.game.observe()
-        dummy_state = self.game.obs_to_state(obs, None)
-        if model_is_recurrent:
-            self.model.forward(dummy_state, iters_to_do=1)
-        else:
-            self.model.forward(dummy_state)
-
-        self.training_host = ModelHost(model, training=True)
+        self.training_host = ModelHost(self.model, training=True)
         self.inference_host = ModelHost(deepcopy(self.model), training=False)
 
         self.optimizer = create_optimizer(
@@ -111,7 +95,7 @@ class AlphaZoo:
             self.scheduler, 
             self.replay_buffer, 
             self.config.learning,
-            self.config.recurrent if model_is_recurrent else None
+            self.config.recurrent if is_recurrent_model else None
         )
 
 
@@ -153,6 +137,8 @@ class AlphaZoo:
     def train(self, on_step_end: Any = None) -> None:
         logger.setLevel(logging.INFO if self.config.verbose else logging.WARNING)
         logger.info("\n")
+
+        show_lr_schedule_preview(self.config, self.scheduler, self.starting_step)
 
         self._profiler: Optional[Profiler] = None
         if "ALPHAZOO_PROFILE" in os.environ:
@@ -264,6 +250,26 @@ class AlphaZoo:
             self._finalize_profiling()
 
         logger.info("All done.\nExiting")
+
+    def _initialize_model(self, model:  AlphaZooNet | AlphaZooRecurrentNet) -> bool:
+        is_recurrent: bool = isinstance(model, AlphaZooRecurrentNet)
+        if is_recurrent and self.config.recurrent is None:
+            raise ValueError(
+                "A RecurrentConfig must be provided when using an AlphaZooRecurrentNet. "
+                "Add recurrent=RecurrentConfig(...) to your AlphaZooConfig."
+            )
+
+        self.model = model
+
+        # dummy forward pass to initialize possible lazy layers before passing the model to the hosts
+        obs = self.game.observe()
+        dummy_state = self.game.obs_to_state(obs, None)
+        if is_recurrent:
+            self.model.forward(dummy_state, iters_to_do=1)
+        else:
+            self.model.forward(dummy_state)
+        
+        return is_recurrent
 
     def _setup_actors(
         self,
