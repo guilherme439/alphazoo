@@ -1,4 +1,4 @@
-from __future__ import annotations
+from typing import override
 
 from torch import Tensor
 
@@ -19,6 +19,7 @@ class IpcInferenceClient(IInferenceClient):
         self._slot.connect()
         self._slot.open_for_client()
 
+    @override
     def inference(self, state: Tensor) -> tuple[Tensor, Tensor]:
         self._slot.send_state(state)
         return self._slot.receive_result()

@@ -1,11 +1,9 @@
-from __future__ import annotations
-
 import os
 import select
 import shutil
 import tempfile
 import threading
-from typing import Optional
+from typing import Optional, override
 import uuid
 
 import ray
@@ -16,6 +14,7 @@ from alphazoo.configs.alphazoo_config import CacheConfig, RecurrentConfig
 
 from ...metrics import MetricsRecorder
 from ...networks.model_host import ModelHost
+from ..iinference_server import IInferenceServer
 from ..caches.keyless_cache import KeylessCache
 from .client import IpcInferenceClient
 from .slot import InferenceSlot
@@ -24,7 +23,7 @@ FLOAT_SIZE_BYTES = 4
 
 
 @ray.remote(max_concurrency=3)
-class IpcInferenceServer:
+class IpcInferenceServer(IInferenceServer):
     """
     Inter-Process Communication inference server. Ray actor that serves
     inference for clients running in separate processes on the same machine.
@@ -95,9 +94,11 @@ class IpcInferenceServer:
     def get_pid(self) -> int:
         return os.getpid()
 
+    @override
     def get_clients(self) -> list[IpcInferenceClient]:
         return self._clients
 
+    @override
     def publish_model(self, state_dict: dict) -> None:
         with self._wlock:
             self._model_host.load_state_dict(state_dict)

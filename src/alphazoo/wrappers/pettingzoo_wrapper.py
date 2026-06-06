@@ -6,7 +6,7 @@ the interface expected by the AlphaZero algorithm.
 """
 
 import copy
-from typing import Any
+from typing import Any, override
 
 import numpy as np
 import torch
@@ -54,15 +54,18 @@ class PettingZooWrapper(IAlphazooGame):
         self._state_shape, self._state_size = self._compute_state_info()
         
 
+    @override
     def reset(self, *args, **kwargs) -> None:
         self.env.reset(*args, **kwargs)
         self._step_count = 0
 
+    @override
     def step(self, action: int, *args, **kwargs) -> None:
         self.env.step(action, *args, **kwargs)
         self._step_count += 1
 
-    def clone(self) -> "PettingZooWrapper":
+    @override
+    def clone(self) -> PettingZooWrapper:
         return copy.deepcopy(self)
 
 
@@ -70,17 +73,21 @@ class PettingZooWrapper(IAlphazooGame):
     # Game state queries
     # ------------------------------------------------------------------
 
+    @override
     def is_terminal(self) -> bool:
         return any(self.env.terminations.values()) or any(self.env.truncations.values())
 
+    @override
     def get_terminal_value(self) -> float:
         current_agent = self.env.agent_selection
         return float(self.env.rewards[current_agent])
 
+    @override
     def get_current_player(self) -> int:
         current_agent = self.env.agent_selection
         return self.env.possible_agents.index(current_agent) + 1
 
+    @override
     def get_length(self) -> int:
         return self._step_count
 
@@ -88,9 +95,11 @@ class PettingZooWrapper(IAlphazooGame):
     # Observation interface
     # ------------------------------------------------------------------
 
+    @override
     def observe(self) -> dict:
         return self.env.observe(self.env.agent_selection)
 
+    @override
     def obs_to_state(self, obs: dict, agent_id: Any) -> torch.Tensor:
         """
         Convert a raw PettingZoo observation dict to a network input tensor.
@@ -107,20 +116,25 @@ class PettingZooWrapper(IAlphazooGame):
             observation = observation.astype(np.float32)
         return torch.from_numpy(observation).unsqueeze(0)
 
+    @override
     def action_mask(self, obs: dict) -> np.ndarray:
         if isinstance(obs, dict) and 'action_mask' in obs:
             return np.array(obs['action_mask'], dtype=np.float32)
         return np.ones(self._num_actions, dtype=np.float32)
 
+    @override
     def get_action_shape(self) -> tuple[int, ...]:
         return self._action_shape
 
+    @override
     def get_action_size(self) -> int:
         return self._num_actions
 
+    @override
     def get_state_shape(self) -> tuple[int, ...]:
         return self._state_shape
 
+    @override
     def get_state_size(self) -> int:
         return self._state_size
 

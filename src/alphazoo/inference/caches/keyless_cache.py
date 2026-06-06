@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import hashlib
 import math
 from typing import Any, Callable, Optional
@@ -7,14 +5,12 @@ from typing import Any, Callable, Optional
 import torch
 from readerwriterlock import rwlock
 
-from .cache import Cache
-
 
 _FINGERPRINT_BITS = 128
 _MAX_INDEX_BITS = 512 - _FINGERPRINT_BITS  # blake2b max digest is 512 bits
 
 
-class KeylessCache(Cache):
+class KeylessCache:
     """
     Direct-mapped, thread-safe cache that avoids storing keys.
 

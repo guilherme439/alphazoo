@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import logging
 import sys
 import threading
@@ -12,7 +10,7 @@ logger = logging.getLogger("alphazoo")
 class _StdoutGuard:
     """Wraps a TextIO stream; reports writes that didn't originate from the spinner."""
 
-    def __init__(self, spinner: "Spinner", wrapped: TextIO) -> None:
+    def __init__(self, spinner: Spinner, wrapped: TextIO) -> None:
         self._spinner = spinner
         self._wrapped = wrapped
 
@@ -71,7 +69,7 @@ class Spinner:
         self._original_stdout: Optional[TextIO] = None
         self._original_stderr: Optional[TextIO] = None
 
-    def __enter__(self) -> "Spinner":
+    def __enter__(self) -> Spinner:
         if not self._enabled:
             return self
         self._start_time = time.time()

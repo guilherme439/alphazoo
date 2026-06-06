@@ -6,8 +6,6 @@ AlphaZoo training. For PettingZoo environments, `PettingZooWrapper` provides
 a ready-made implementation.
 """
 
-from __future__ import annotations
-
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -38,7 +36,7 @@ class IAlphazooGame(ABC):
         ...
 
     @abstractmethod
-    def clone(self) -> "IAlphazooGame":
+    def clone(self) -> IAlphazooGame:
         """
         Return a fully independent copy of the current game state.
 
@@ -134,7 +132,7 @@ class IAlphazooGame(ABC):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def serialize(game: "IAlphazooGame") -> bytes:
+    def serialize(game: IAlphazooGame) -> bytes:
         """
         Return a byte representation of the full game state.
 
@@ -146,7 +144,7 @@ class IAlphazooGame(ABC):
         return cloudpickle.dumps(game)
 
     @staticmethod
-    def deserialize(data: bytes) -> "IAlphazooGame":
+    def deserialize(data: bytes) -> IAlphazooGame:
         """
         Reconstruct a game from bytes produced by ``serialize``.
 

@@ -1,6 +1,4 @@
-from __future__ import annotations
-
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 from torch import Tensor
 
@@ -16,8 +14,9 @@ class LpcInferenceClient(IInferenceClient):
     server synchronously, in-process.
     """
 
-    def __init__(self, server: "LpcInferenceServer") -> None:
+    def __init__(self, server: LpcInferenceServer) -> None:
         self._server = server
 
+    @override
     def inference(self, state: Tensor) -> tuple[Tensor, Tensor]:
         return self._server.inference(state)

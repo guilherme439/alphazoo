@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import logging
 import sys
 import threading
@@ -46,7 +44,7 @@ class Bar:
         self._last_logged_milestone: int = -1
         self._lock = threading.Lock()
 
-    def __enter__(self) -> "Bar":
+    def __enter__(self) -> Bar:
         if not self._enabled:
             return self
         self._start_time = time.time()

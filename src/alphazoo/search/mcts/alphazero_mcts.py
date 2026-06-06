@@ -1,10 +1,7 @@
-from __future__ import annotations
-
 import itertools
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
-from typing_extensions import override
+from typing import Any, override
 
 import numpy as np
 from scipy.special import softmax
@@ -53,6 +50,7 @@ class AlphazeroMCTS(MCTS):
             use_action_exploration=use_action_exploration,
         )
 
+    @override
     def _expand_node(self, node: Node, game: IAlphazooGame) -> float:
         node.set_to_play(game.get_current_player())
 

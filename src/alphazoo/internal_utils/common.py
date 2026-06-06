@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import logging
 from typing import Any, Callable
 
@@ -15,7 +13,7 @@ from ..inference.caches.keyless_cache import KeylessCache
 from ..inference.ipc import IpcInferenceClient
 from .loss_functions import AbsoluteError, KLDivergence, MSError, SquaredError
 
-LossFunction = Callable[[Tensor, Tensor], Tensor]
+type LossFunction = Callable[[Tensor, Tensor], Tensor]
 
 logger = logging.getLogger("alphazoo")
 

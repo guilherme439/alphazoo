@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Optional
 
 import os
@@ -77,7 +75,7 @@ class InferenceSlot:
         self._ready_fd = os.open(self._ready_path, os.O_WRONLY)
         self._done_fd = os.open(self._done_path, os.O_RDONLY)
 
-    def new_view(self) -> "InferenceSlot":
+    def new_view(self) -> InferenceSlot:
         return InferenceSlot(
             self._state_size, self._action_size,
             self._state_nbytes, self._policy_nbytes, self._value_nbytes,

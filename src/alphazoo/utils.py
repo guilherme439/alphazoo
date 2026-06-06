@@ -2,8 +2,6 @@
 Public facing utils methods
 """
 
-from __future__ import annotations
-
 from pettingzoo.utils.env import AECEnv
 from torch import nn
 

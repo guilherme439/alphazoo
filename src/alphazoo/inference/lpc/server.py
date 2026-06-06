@@ -1,4 +1,4 @@
-from __future__ import annotations
+from typing import override
 
 import torch
 from torch import Tensor, nn
@@ -29,9 +29,11 @@ class LpcInferenceServer(IInferenceServer):
         self._model.eval()
         self._clients: list[LpcInferenceClient] = [LpcInferenceClient(self) for _ in range(num_clients)]
 
+    @override
     def get_clients(self) -> list[IInferenceClient]:
         return list(self._clients)
 
+    @override
     def publish_model(self, state_dict: dict) -> None:
         self._model.load_state_dict(state_dict)
         self._model.eval()

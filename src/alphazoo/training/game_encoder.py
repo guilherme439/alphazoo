@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import zlib
 
 from ..ialphazoo_game import IAlphazooGame
