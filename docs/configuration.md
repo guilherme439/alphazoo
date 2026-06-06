@@ -296,13 +296,13 @@ Only used when `type` is `"SGD"`.
 
 ## Scheduler
 
-Controls the learning rate schedule. The `type` field selects which schedule to use; every variant shares `starting_lr`, the base learning rate the schedule is built on.
+Controls the learning rate schedule. The `type` field selects which schedule to use.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `type` | `step` / `linear` / `sin` | `step` | Which schedule to use. |
+| `type` | `step` / `linear` / `sin` | *(required)* | Which schedule to use. |
 | `starting_lr` | `float` | `1e-4` | Base learning rate. |
-| `show_preview` | `bool` | `false` | When `true`, `train()` opens a window with the whole-run learning-rate curve (plotted against the training iteration) and waits until it is closed before training starts. Available only for the `samples` learning method, where the optimizer steps per iteration are known ahead of the run. |
+| `show_preview` | `bool` | `false` | When `true`, `train()` opens a window with a preview of the lr schedule for the whole-run and waits until it is closed before training starts. |
 
 ### step
 

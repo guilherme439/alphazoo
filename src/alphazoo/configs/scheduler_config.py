@@ -1,19 +1,13 @@
 from dataclasses import dataclass, field
-from typing import Annotated, Any, Literal, Optional, Union
+from typing import Annotated, Literal, Optional, Union
 
-from pydantic import Field, TypeAdapter
+from pydantic import Field
 
 
 @dataclass
 class BaseSchedulerConfig:
     starting_lr: float = 1.0e-4
     show_preview: bool = False
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> BaseSchedulerConfig:
-        payload = dict(data) if data else {}
-        payload.setdefault("type", "step")
-        return TypeAdapter(SchedulerConfig).validate_python(payload)
 
 
 @dataclass

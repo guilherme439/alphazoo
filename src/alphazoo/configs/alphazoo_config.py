@@ -2,8 +2,9 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Optional
 
 from omegaconf import OmegaConf
+from pydantic import TypeAdapter
 
-from .scheduler_config import BaseSchedulerConfig
+from .scheduler_config import SchedulerConfig, StepSchedulerConfig
 from .search_config import SearchConfig
 
 
@@ -111,13 +112,9 @@ class AlphaZooConfig:
     cache: CacheConfig = field(default_factory=CacheConfig)
     learning: LearningConfig = field(default_factory=LearningConfig)
     recurrent: Optional[RecurrentConfig] = None
-    scheduler: Any = None # Polymorphic - defined at runtime
+    scheduler: SchedulerConfig = field(default_factory=StepSchedulerConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.scheduler, BaseSchedulerConfig):
-            self.scheduler = BaseSchedulerConfig.from_dict(self.scheduler or {})
 
     @classmethod
     def from_yaml(cls, path: str) -> AlphaZooConfig:
@@ -125,11 +122,12 @@ class AlphaZooConfig:
 
     @classmethod
     def from_dict(cls, data: Any) -> AlphaZooConfig:
-        schema = OmegaConf.structured(cls)
-        cfg = OmegaConf.merge(schema, data)
-
-        cfg.learning.replay_buffer.reanalyse.search = OmegaConf.merge(
-            cfg.search,
-            cfg.learning.replay_buffer.reanalyse.search
+        cfg = OmegaConf.create(data)
+        reanalyse_search = OmegaConf.merge(
+            OmegaConf.select(cfg, "search"),
+            OmegaConf.select(cfg, "learning.replay_buffer.reanalyse.search", default={}),
         )
-        return OmegaConf.to_object(cfg)  # type: ignore[return-value]
+        OmegaConf.update(cfg, "learning.replay_buffer.reanalyse.search", reanalyse_search, merge=False, force_add=True)
+        plain_dict = OmegaConf.to_container(cfg, resolve=True)
+
+        return TypeAdapter(cls).validate_python(plain_dict)
