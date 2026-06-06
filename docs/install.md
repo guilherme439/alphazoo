@@ -4,7 +4,7 @@
 
 ### 1. GPU drivers (AMD only)
 
-PyTorch's AMD build runs on the system ROCm stack — the `amdgpu` kernel driver and the ROCm runtime. Install it with [AMD's ROCm install guide](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/) for your distribution, then confirm the installed version:
+PyTorch's AMD build runs on the system ROCm stack - the `amdgpu` kernel driver and the ROCm runtime. Install it with [AMD's ROCm install guide](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/) for your distribution, then confirm the installed version:
 
 ```bash
 cat /opt/rocm/.info/version
@@ -49,7 +49,7 @@ The [PyTorch install selector](https://pytorch.org/get-started/locally/) lists w
 # to use the package
 pip install .
 
-# for development — editable install with test tooling
+# for development - editable install with test tooling
 pip install -e . --group dev
 ```
 
