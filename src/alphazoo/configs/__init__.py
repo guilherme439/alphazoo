@@ -6,6 +6,7 @@ from .scheduler_config import (
     SinSchedulerConfig,
     SchedulerConfig,
 )
+from .optimizer_config import OptimizerConfig, SGDConfig
 from .alphazoo_config import (
     AlphaZooConfig,
     RunningConfig,
@@ -16,8 +17,6 @@ from .alphazoo_config import (
     EpochsConfig,
     SamplesConfig,
     RecurrentConfig,
-    OptimizerConfig,
-    SGDConfig,
 )
 
 __all__ = [

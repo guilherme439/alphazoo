@@ -4,6 +4,8 @@ from typing import Any, Literal, Optional
 from omegaconf import OmegaConf
 from pydantic import TypeAdapter
 
+from .optimizer_config import OptimizerConfig
+from .replay_buffer_config import ReplayBufferConfig
 from .scheduler_config import SchedulerConfig, StepSchedulerConfig
 from .search_config import SearchConfig
 
@@ -20,12 +22,6 @@ class AsynchronousConfig:
 
 
 @dataclass
-class CacheConfig:
-    enabled: bool = True
-    max_size: int = 8000
-
-
-@dataclass
 class RunningConfig:
     running_mode: Literal["sequential", "asynchronous"] = "sequential"
     num_gamers: int = 4
@@ -33,7 +29,12 @@ class RunningConfig:
     sequential: SequentialConfig = field(default_factory=SequentialConfig)
     asynchronous: AsynchronousConfig = field(default_factory=AsynchronousConfig)
 
+@dataclass
+class CacheConfig:
+    enabled: bool = True
+    max_size: int = 8000
 
+    
 @dataclass
 class RecurrentConfig:
     inference_iterations: int = 1
@@ -63,23 +64,6 @@ class DataConfig:
 
 
 @dataclass
-class ReanalyseConfig:
-    enabled: bool = False
-    num_workers: int = 1
-    positions_per_step: int = 1
-    min_buffer_fill_ratio: float = 0.5
-    compress_games: bool = False
-    search: SearchConfig = field(default_factory=SearchConfig)
-
-
-@dataclass
-class ReplayBufferConfig:
-    window_size: int = 10000
-    leak_chance: float = 0.0
-    reanalyse: ReanalyseConfig = field(default_factory=ReanalyseConfig)
-
-
-@dataclass
 class LearningConfig:
     replay_buffer: ReplayBufferConfig = field(default_factory=ReplayBufferConfig)
     value_loss: Literal["SE", "AE"] = "SE"
@@ -89,19 +73,6 @@ class LearningConfig:
     learning_method: Literal["samples", "epochs"] = "samples"
     samples: SamplesConfig = field(default_factory=SamplesConfig)
     epochs: EpochsConfig = field(default_factory=EpochsConfig)
-
-
-@dataclass
-class SGDConfig:
-    weight_decay: float = 1.0e-7
-    momentum: float = 0.9
-    nesterov: bool = True
-
-
-@dataclass
-class OptimizerConfig:
-    type: Literal["Adam", "SGD"] = "Adam"
-    sgd: SGDConfig = field(default_factory=SGDConfig)
 
 
 @dataclass

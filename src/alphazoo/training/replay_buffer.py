@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Optional
 import numpy as np
 import torch
 
-from alphazoo.configs.alphazoo_config import ReplayBufferConfig
+from alphazoo.configs.replay_buffer_config import ReplayBufferConfig
 
 from .game_record import GameRecord
 

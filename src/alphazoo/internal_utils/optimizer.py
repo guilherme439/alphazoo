@@ -8,7 +8,8 @@ import torch
 from torch.optim import SGD, Adam, Optimizer
 from torch.optim.lr_scheduler import LambdaLR, LinearLR, LRScheduler, MultiStepLR
 
-from alphazoo.configs.alphazoo_config import AlphaZooConfig, OptimizerConfig
+from alphazoo.configs.alphazoo_config import AlphaZooConfig
+from alphazoo.configs.optimizer_config import OptimizerConfig
 from alphazoo.configs.scheduler_config import (
     BaseSchedulerConfig,
     LinearSchedulerConfig,

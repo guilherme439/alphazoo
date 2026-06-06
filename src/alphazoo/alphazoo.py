@@ -11,7 +11,8 @@ from ray.util import ActorPool
 
 from .internal_utils.exception_handler import ExceptionHandler
 
-from .configs.alphazoo_config import AlphaZooConfig, AsynchronousConfig, CacheConfig, LearningConfig, ReanalyseConfig, RecurrentConfig, RunningConfig, SequentialConfig
+from .configs.alphazoo_config import AlphaZooConfig, AsynchronousConfig, CacheConfig, LearningConfig, RecurrentConfig, RunningConfig, SequentialConfig
+from .configs.replay_buffer_config import ReanalyseConfig
 from .configs.search_config import SearchConfig
 from .ialphazoo_game import IAlphazooGame
 from .inference.ipc import IpcInferenceClient, IpcInferenceServer
@@ -165,6 +166,7 @@ class AlphaZoo:
             self._async_gamer_futures = [gamer.play_forever.remote() for gamer in self._gamers]
             
         self._reanalyser_pool: Optional[ActorPool] = None
+        self._reanalyse_backlog: int = 0
         if self._reanalyse_enabled:
             self._reanalyser_pool = ActorPool(self._reanalysers)
 
@@ -183,10 +185,7 @@ class AlphaZoo:
                 step_start = time.time()
 
                 if self._reanalyse_enabled:
-                    self._run_reanalyse(
-                        reanalyse_config.positions_per_step,
-                        reanalyse_config.min_buffer_fill_ratio
-                    )
+                    self._run_reanalyse(reanalyse_config)
 
                 if running_mode == "sequential":
                     games_this_step = self._run_selfplay(running_config.sequential)
@@ -400,22 +399,34 @@ class AlphaZoo:
 
         return games_played
 
-    def _run_reanalyse(self, positions_per_step: int, min_buffer_fill_ratio: float) -> None:
+    def _run_reanalyse(self, config: ReanalyseConfig) -> None:
         # results from previous iterations
         results: list[ReanalyseResult] = drain_actor_pool_results(self._reanalyser_pool)
         for result in results:
             self.replay_buffer.apply_reanalyse_result(result, self.current_step)
+        self._reanalyse_backlog -= len(results)
 
-        if positions_per_step <= 0:
+        if config.positions_per_step <= 0:
             return
-        if self.replay_buffer.fill_ratio() < min_buffer_fill_ratio:
+        if self.replay_buffer.fill_ratio() < config.min_buffer_fill_ratio:
             return
 
-        oldest_entries = self.replay_buffer.pop_oldest(positions_per_step)
+        self._log_tasks_pending(config.positions_per_step)
+
+        oldest_entries = self.replay_buffer.pop_oldest(config.positions_per_step)
+        self._reanalyse_backlog += len(oldest_entries)
         for key, entry in oldest_entries:
             request = ReanalyseRequest(key=key, entry=entry)
             self._reanalyser_pool.submit(lambda actor, req: actor.process.remote(req), request)      
             
+    def _log_tasks_pending(self, positions_per_step: int) -> None:
+        logger.info(f"\nReanalyse backlog: {self._reanalyse_backlog} tasks pending.")
+        if self._reanalyse_backlog > int(positions_per_step * 0.5):
+            logger.warning(
+                f"Reanalyse workers are lagging behind the main loop!"
+                f"There are {self._reanalyse_backlog} tasks pending."
+            )
+
     def _collect_completed_games(self) -> int:
         all_game_record_lists = ray.get([gamer.get_completed_games.remote() for gamer in self._gamers])
         total_completed_games = 0
