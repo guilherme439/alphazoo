@@ -1,8 +1,10 @@
 import os
+import queue
 from dataclasses import dataclass
 
 import ray
 import torch
+from ray.actor import ActorHandle
 
 from ..configs.search_config import SearchConfig
 from ..inference.ipc import IpcInferenceClient
@@ -29,7 +31,7 @@ class ReanalyseResult:
     
 
 
-@ray.remote(scheduling_strategy="SPREAD", max_concurrency=1)
+@ray.remote(scheduling_strategy="SPREAD", max_concurrency=2)
 class Reanalyser:
 
     def __init__(
@@ -53,10 +55,35 @@ class Reanalyser:
             threaded=search_config.simulation.parallel_search,
         )
 
+        self._results: queue.Queue[ReanalyseResult] = queue.Queue()
+        self._stopped = False
+
+    def run(self, coordinator: ActorHandle) -> None:
+        while not self._stopped:
+            requests: list[ReanalyseRequest] = ray.get(coordinator.get_work.remote())
+            if not requests:
+                break
+            for request in requests:
+                if self._stopped:
+                    break
+                self._results.put(self._process(request))
+
+    def get_results(self) -> list[ReanalyseResult]:
+        results: list[ReanalyseResult] = []
+        while True:
+            try:
+                results.append(self._results.get_nowait())
+            except queue.Empty:
+                break
+        return results
+
+    def stop(self) -> None:
+        self._stopped = True
+
     def get_pid(self) -> int:
         return os.getpid()
 
-    def process(self, request: ReanalyseRequest) -> ReanalyseResult:
+    def _process(self, request: ReanalyseRequest) -> ReanalyseResult:
         game: IAlphazooGame = self._game_encoder.decode(request.entry.game_snapshot)
 
         root_node = Node(0)

@@ -17,7 +17,7 @@ from .configs.search_config import SearchConfig
 from .ialphazoo_game import IAlphazooGame
 from .inference.ipc import IpcInferenceClient, IpcInferenceServer
 from .internal_utils.optimizer import create_optimizer, create_scheduler, show_lr_schedule_preview, sync_optimizer_lr
-from .internal_utils.common import distribute_clients, drain_actor_pool_results
+from .internal_utils.common import distribute_clients
 from .internal_utils.progress import Spinner
 from .metrics import MetricsRecorder, MetricsStore
 from .networks.interfaces import AlphaZooNet, AlphaZooRecurrentNet
@@ -28,7 +28,8 @@ from .training.game_encoder import GameEncoder
 from .training.game_record import GameRecord
 from .training.gamer import Gamer
 from .training.network_trainer import NetworkTrainer
-from .training.reanalyser import Reanalyser, ReanalyseRequest, ReanalyseResult
+from .training.reanalyse_coordinator import ReanalyseCoordinator
+from .training.reanalyser import ReanalyseRequest, ReanalyseResult
 from .training.replay_buffer import ReplayBuffer
 
 logger = logging.getLogger("alphazoo")
@@ -165,10 +166,7 @@ class AlphaZoo:
         else:
             self._async_gamer_futures = [gamer.play_forever.remote() for gamer in self._gamers]
             
-        self._reanalyser_pool: Optional[ActorPool] = None
         self._reanalyse_backlog: int = 0
-        if self._reanalyse_enabled:
-            self._reanalyser_pool = ActorPool(self._reanalysers)
 
         # ---- MAIN TRAINING LOOP ---- #
 
@@ -237,7 +235,8 @@ class AlphaZoo:
 
         if self._reanalyse_enabled:
             logger.info("Waiting for reanalyse actors to terminate...\n")
-            results = drain_actor_pool_results(self._reanalyser_pool, block=True)
+            ray.get(self._reanalyse_coordinator.stop.remote())
+            results = ray.get(self._reanalyse_coordinator.collect_results.remote())
             for result in results:
                 self.replay_buffer.apply_reanalyse_result(result, self.current_step)
 
@@ -304,11 +303,11 @@ class AlphaZoo:
         if self._profiler:
             self._profiler.attach("gamer", self._gamers)
 
-        self._reanalysers: list[ActorHandle] = []
+        self._reanalyse_coordinator: Optional[ActorHandle] = None
         if self._reanalyse_enabled:
-            self._reanalysers = self._create_reanalysers(reanalyser_clients, reanalyse_config.search)
-            if self._profiler:
-                self._profiler.attach("reanalyser", self._reanalysers)
+            self._reanalyse_coordinator = self._create_reanalyse_coordinator(
+                reanalyser_clients, reanalyse_config
+            )
 
     def _start_inference_server(
         self,
@@ -352,21 +351,26 @@ class AlphaZoo:
             gamers.append(gamer)
         return gamers
 
-    def _create_reanalysers(
+    def _create_reanalyse_coordinator(
         self,
         reanalyser_clients: list[list[IpcInferenceClient]],
-        search_config: SearchConfig,
-    ) -> list[ActorHandle]:
-        reanalysers: list[ActorHandle] = []
-        for clients in reanalyser_clients:
-            reanalyser = Reanalyser.remote(
-                search_config,
-                self.config.data.player_dependent_value,
-                clients,
-                self._game_encoder,
-            )
-            reanalysers.append(reanalyser)
-        return reanalysers
+        reanalyse_config: ReanalyseConfig,
+    ) -> ActorHandle:
+        coordinator = ReanalyseCoordinator.options(
+            max_concurrency=reanalyse_config.num_workers + 2
+        ).remote(
+            reanalyser_clients,
+            reanalyse_config,
+            self.config.data.player_dependent_value,
+            self._game_encoder,
+        )
+        ray.get(coordinator.start.remote())
+
+        if self._profiler:
+            workers = ray.get(coordinator.get_workers.remote())
+            self._profiler.attach("reanalyser", workers)
+
+        return coordinator
 
     def _wait_for_selfplay(self, config: AsynchronousConfig) -> int:
         deadline = time.time() + config.update_delay
@@ -401,7 +405,7 @@ class AlphaZoo:
 
     def _run_reanalyse(self, config: ReanalyseConfig) -> None:
         # results from previous iterations
-        results: list[ReanalyseResult] = drain_actor_pool_results(self._reanalyser_pool)
+        results: list[ReanalyseResult] = ray.get(self._reanalyse_coordinator.collect_results.remote())
         for result in results:
             self.replay_buffer.apply_reanalyse_result(result, self.current_step)
         self._reanalyse_backlog -= len(results)
@@ -415,15 +419,14 @@ class AlphaZoo:
 
         oldest_entries = self.replay_buffer.pop_oldest(config.positions_per_step)
         self._reanalyse_backlog += len(oldest_entries)
-        for key, entry in oldest_entries:
-            request = ReanalyseRequest(key=key, entry=entry)
-            self._reanalyser_pool.submit(lambda actor, req: actor.process.remote(req), request)      
+        requests = [ReanalyseRequest(key=key, entry=entry) for key, entry in oldest_entries]
+        self._reanalyse_coordinator.enqueue.remote(requests)
             
     def _log_tasks_pending(self, positions_per_step: int) -> None:
         logger.info(f"\nReanalyse backlog: {self._reanalyse_backlog} tasks pending.")
         if self._reanalyse_backlog > int(positions_per_step * 0.5):
             logger.warning(
-                f"Reanalyse workers are lagging behind the main loop!"
+                f"Reanalyse workers are lagging behind the main loop! "
                 f"There are {self._reanalyse_backlog} tasks pending."
             )
 
