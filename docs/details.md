@@ -146,21 +146,35 @@ def on_step_end(az, step, metrics):
 
 ---
 
-## Resuming training
+## Saving and resuming
 
-`AlphaZoo` accepts optional state dicts to resume from a checkpoint:
+`AlphaZoo.save` writes a checkpoint directory holding the optimizer, scheduler, replay buffer, and (unless `save_model=False`) the full model:
 
 ```python
-trainer = AlphaZoo(
-    env=env,
-    config=config,
-    model=model,
-    optimizer_state_dict=checkpoint["optimizer_state_dict"],
-    scheduler_state_dict=checkpoint["scheduler_state_dict"],
-    replay_buffer_state=checkpoint["replay_buffer_state"],
-)
-trainer.starting_step = checkpoint["iteration"]
+trainer.save("checkpoints/iter_100")
+```
+
+Each component is serialized directly to disk under its own lock, so `save` is safe to call from a background thread (for example a checkpoint-writer thread) while training runs.
+
+`AlphaZoo.from_checkpoint` rebuilds a trainer from a checkpoint. With no `model` argument it reconstructs the network from the saved `model.pt`, so the checkpoint must have been written with `save_model=True`:
+
+```python
+trainer = AlphaZoo.from_checkpoint("checkpoints/iter_100", env=env, config=config)
 trainer.train()
 ```
 
-When an `optimizer_state_dict` or `scheduler_state_dict` is passed, the matching `config` section (`optimizer` / `scheduler`) is ignored. If you do not pass either it will be rebuild from config again.
+Pass a `model` to load the checkpoint's weights into your own architecture. Boolean flags select what to restore, and `model_strict=False` tolerates an architecture change (missing or extra layers are ignored):
+
+```python
+trainer = AlphaZoo.from_checkpoint(
+    "checkpoints/iter_100",
+    env=env,
+    config=config,
+    model=model,
+    load_optimizer=False,
+    load_replay_buffer=False,
+    model_strict=False,
+)
+```
+
+`load` performs the same restore on an already-constructed instance. The `iteration` recorded in the checkpoint sets `starting_step`, so `train()` continues from the next step.

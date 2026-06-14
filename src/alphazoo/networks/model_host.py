@@ -60,8 +60,8 @@ class ModelHost:
     def get_state_dict(self, device: str = "cpu") -> dict:
         return {k: v.to(device) for k, v in self.model.state_dict().items()}
 
-    def load_state_dict(self, state_dict: dict) -> None:
-        self.model.load_state_dict(state_dict)
+    def load_state_dict(self, state_dict: dict, strict: bool = True) -> None:
+        self.model.load_state_dict(state_dict, strict=strict)
 
     @staticmethod
     def _auto_device() -> str:

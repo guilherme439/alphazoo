@@ -1,13 +1,16 @@
 import logging
 import math
 from random import randrange
+from threading import Lock
 from typing import Any, Callable, Optional
 
 import torch
 from torch import Tensor, nn
 
 from alphazoo.configs.alphazoo_config import LearningConfig, RecurrentConfig
+from alphazoo.internal_utils.checkpoint import atomic_save
 from alphazoo.internal_utils.common import get_policy_loss_fn, get_value_loss_fn
+from alphazoo.internal_utils.concurrency import synchronized
 
 from ..metrics import MetricsRecorder
 from ..networks.model_host import ModelHost
@@ -41,12 +44,31 @@ class NetworkTrainer:
 
         self.recorder = MetricsRecorder()
 
+        self._lock = Lock()
+
     def get_metrics(self) -> dict:
         return self.recorder.drain()
 
     def get_model_state_dict(self) -> dict:
         return self.model_host.get_state_dict()
-    
+
+    @synchronized
+    def write_to(
+        self,
+        optimizer_path: str,
+        scheduler_path: str,
+        model_path: Optional[str] = None,
+    ) -> None:
+        """
+        Serialize the optimizer, scheduler, and (when ``model_path`` is given) the full
+        model to disk while holding the trainer lock, so the three are mutually consistent
+        without an in-memory copy.
+        """
+        atomic_save(self.optimizer.state_dict(), optimizer_path)
+        atomic_save(self.scheduler.state_dict(), scheduler_path)
+        if model_path is not None:
+            atomic_save(self.model_host.model, model_path)
+
     def run_training_step(self) -> None:
         replay_size: int = len(self.replay_buffer)
         if replay_size == 0:
@@ -199,10 +221,14 @@ class NetworkTrainer:
         loss.backward()  # type: ignore[union-attr]
         if self.config.gradient_clip is not None:
             torch.nn.utils.clip_grad_norm_(self.model_host.model.parameters(), self.config.gradient_clip)
-        self.optimizer.step()
-        self.scheduler.step()
+        self._step_optimizer_and_scheduler()
 
         return value_loss.item(), policy_loss.item(), combined_loss.item()  # type: ignore[union-attr]
+
+    @synchronized
+    def _step_optimizer_and_scheduler(self) -> None:
+        self.optimizer.step()
+        self.scheduler.step()
 
     def _standard_batch_update(self, batch: list[Any]) -> tuple[Tensor, Tensor, Tensor]:
         states, targets = list(zip(*batch))

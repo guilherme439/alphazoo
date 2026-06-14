@@ -18,6 +18,7 @@ from .ialphazoo_game import IAlphazooGame
 from .inference.ipc import IpcInferenceClient, IpcInferenceServer
 from .internal_utils.optimizer import create_optimizer, create_scheduler, show_lr_schedule_preview, sync_optimizer_lr
 from .internal_utils.common import distribute_clients
+from .internal_utils import checkpoint
 from .internal_utils.progress import Spinner
 from .metrics import MetricsRecorder, MetricsStore
 from .networks.interfaces import AlphaZooNet, AlphaZooRecurrentNet
@@ -34,6 +35,7 @@ from .training.replay_buffer import ReplayBuffer
 
 logger = logging.getLogger("alphazoo")
 
+
 class AlphaZoo:
     
 
@@ -42,27 +44,17 @@ class AlphaZoo:
         env: AECEnv | IAlphazooGame,
         config: AlphaZooConfig,
         model: AlphaZooNet | AlphaZooRecurrentNet,
-        optimizer_state_dict: Optional[dict] = None,
-        scheduler_state_dict: Optional[dict] = None,
-        replay_buffer_state_dict: Optional[dict] = None,
-        start_iteration: Optional[int] = None,
     ) -> None:
-        """
-        When `optimizer_state_dict` or `scheduler_state_dict` is provided, the
-        corresponding section of `config` (`optimizer` / `scheduler`) is ignored.
-        """
-        
         self.config = config
         self.game = env if isinstance(env, IAlphazooGame) else PettingZooWrapper(
             env,
             observation_format=config.data.observation_format,
             network_input_format=config.data.network_input_format,
         )
-        self.starting_step: int = start_iteration if start_iteration is not None else 0
+        self.current_step: int = - 1 # the -1 means no step completed yet
+        self.starting_step: int = 0
 
         self.replay_buffer = ReplayBuffer(self.config.learning.replay_buffer)
-        if replay_buffer_state_dict is not None:
-            self.replay_buffer.load(replay_buffer_state_dict)
 
 
         # -------------------- NETWORK SETUP ------------------- #
@@ -78,18 +70,9 @@ class AlphaZoo:
             config.optimizer
         )
         self.scheduler = create_scheduler(
-            self.optimizer, 
+            self.optimizer,
             config.scheduler
         )
-
-        if scheduler_state_dict is not None:
-            self.scheduler.load_state_dict(scheduler_state_dict)
-
-        if optimizer_state_dict is not None:
-            self.optimizer.load_state_dict(optimizer_state_dict)
-
-        if scheduler_state_dict is not None or optimizer_state_dict is not None:
-            sync_optimizer_lr(self.optimizer, self.scheduler)
 
         self.trainer = NetworkTrainer(
             self.training_host,
@@ -118,6 +101,49 @@ class AlphaZoo:
             "inference/cycle_size",
             "inference/bucket_size",
         })
+
+    @classmethod
+    def from_checkpoint(
+        cls,
+        path: str,
+        env: AECEnv | IAlphazooGame,
+        config: AlphaZooConfig,
+        model: Optional[AlphaZooNet | AlphaZooRecurrentNet] = None,
+        *,
+        load_model: bool = True,
+        load_optimizer: bool = True,
+        load_scheduler: bool = True,
+        load_replay_buffer: bool = True,
+        model_strict: bool = True,
+    ) -> AlphaZoo:
+        """
+        Construct an instance and restore a checkpoint written by `save`.
+
+        Pass the same `model` architecture you trained with; its weights are restored from
+        the checkpoint. `model` may be omitted only when the checkpoint was written with
+        `save_model=True`, in which case the network is rebuilt from the saved `model.pt`.
+        Omitting `model` for a checkpoint that has no saved model raises.
+        """
+        if model is None:
+            model_path = os.path.join(path, checkpoint.MODEL_FILE)
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(
+                    f"No model provided and checkpoint '{path}' has no saved model "
+                    f"('{checkpoint.MODEL_FILE}'); pass a model or save with save_model=True."
+                )
+            model = checkpoint.load_component(path, checkpoint.MODEL_FILE, "cpu")
+            load_model = False  # the reconstructed model already carries the weights
+
+        instance = cls(env, config, model)
+        instance.load(
+            path,
+            load_model=load_model,
+            load_optimizer=load_optimizer,
+            load_scheduler=load_scheduler,
+            load_replay_buffer=load_replay_buffer,
+            model_strict=model_strict,
+        )
+        return instance
     
     # ------------------------------------------------------------------------- #
     # -------------------------- PUBLIC FACING METHODS ------------------------ #
@@ -126,14 +152,85 @@ class AlphaZoo:
     # --------------- INTERNAL STATE PROBES --------------- #
 
     def get_optimizer_state_dict(self) -> dict:
+        """Live optimizer state. Not thread-safe; use `save` for a consistent checkpoint during training."""
         return self.optimizer.state_dict()
 
     def get_scheduler_state_dict(self) -> dict:
+        """Live scheduler state. Not thread-safe; use `save` for a consistent checkpoint during training."""
         return self.scheduler.state_dict()
 
     def get_replay_buffer_state_dict(self) -> dict:
+        """Live replay buffer state. Not thread-safe; use `save` for a consistent checkpoint during training."""
         return self.replay_buffer.state_dict()
-    
+
+    def get_model_state_dict(self) -> dict:
+        """Live model weights. Not thread-safe; use `save` for a consistent checkpoint during training."""
+        return self.trainer.get_model_state_dict()
+
+
+    # ------------------- CHECKPOINTING ------------------- #
+
+    def save(self, path: str, save_model: bool = True) -> None:
+        """
+        Write a checkpoint directory at `path`: optimizer, scheduler, replay buffer, and
+        (when `save_model`) the full model, plus a `metadata.json` written last.
+
+        Thread-safe: each component is serialized directly to disk under its owning lock,
+        so this may be called from a background thread while training runs.
+        """
+        os.makedirs(path, exist_ok=True)
+
+        self.replay_buffer.write_to(os.path.join(path, checkpoint.REPLAY_BUFFER_FILE))
+
+        model_path = os.path.join(path, checkpoint.MODEL_FILE) if save_model else None
+        self.trainer.write_to(
+            os.path.join(path, checkpoint.OPTIMIZER_FILE),
+            os.path.join(path, checkpoint.SCHEDULER_FILE),
+            model_path,
+        )
+
+        checkpoint.write_metadata(path, self.current_step)
+
+    def load(
+        self,
+        path: str,
+        *,
+        load_model: bool = True,
+        load_optimizer: bool = True,
+        load_scheduler: bool = True,
+        load_replay_buffer: bool = True,
+        model_strict: bool = True,
+    ) -> None:
+        """
+        Restore the requested components from the checkpoint directory at `path`.
+
+        The iteration is always restored from `metadata.json` (so `train` continues from the
+        next step). Intended for setup / resume; not for use concurrently with a running
+        `train`. Raises if `metadata.json` or a requested component file is missing.
+        """
+        metadata = checkpoint.read_metadata(path)
+
+        if load_model:
+            model = checkpoint.load_component(path, checkpoint.MODEL_FILE, self.training_host.device())
+            state_dict = model.state_dict()
+            self.training_host.load_state_dict(state_dict, strict=model_strict)
+            self.inference_host.load_state_dict(state_dict, strict=model_strict)
+        if load_optimizer:
+            self.optimizer.load_state_dict(
+                checkpoint.load_component(path, checkpoint.OPTIMIZER_FILE, self.training_host.device())
+            )
+        if load_scheduler:
+            self.scheduler.load_state_dict(
+                checkpoint.load_component(path, checkpoint.SCHEDULER_FILE, "cpu")
+            )
+        if load_optimizer or load_scheduler:
+            sync_optimizer_lr(self.optimizer, self.scheduler)
+        if load_replay_buffer:
+            self.replay_buffer.load(checkpoint.load_component(path, checkpoint.REPLAY_BUFFER_FILE, "cpu"))
+
+        self.current_step = metadata["iteration"]
+        self.starting_step = metadata["iteration"] + 1
+
     # ----------------------------------------------------- #
 
     def train(self, on_step_end: Any = None) -> None:
@@ -210,6 +307,7 @@ class AlphaZoo:
                 self._log_step_metrics(public, internal)
                 logger.info("\n-------------------------------------\n\n")
 
+                stop_requested = False
                 if on_step_end is not None:
                     callback_return = on_step_end(self, step, public)
                     stop_requested = callback_return is False
