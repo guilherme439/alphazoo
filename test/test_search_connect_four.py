@@ -75,8 +75,7 @@ class TestConnectFourMCTS:
         root = Node(0)
 
         action, _ = explorer.run_alphazero_mcts(game, root, [inference_client])
-        obs = game.observe()
-        assert game.action_mask(obs)[action] == 1.0
+        assert game.legal_actions_mask()[action] == 1.0
 
     def test_root_expands_all_7_columns(self, search_config, inference_client):
         explorer = Explorer(search_config)
@@ -95,8 +94,7 @@ class TestConnectFourMCTS:
             game.step(0)
             game.step(0)
 
-        obs = game.observe()
-        mask = game.action_mask(obs)
+        mask = game.legal_actions_mask()
         assert mask[0] == 0.0, "Column 0 should be full"
 
         action, _ = explorer.run_alphazero_mcts(game, Node(0), [inference_client])
@@ -108,12 +106,12 @@ class TestConnectFourMCTS:
         game.step(3)
         game.step(2)
 
-        length_before = game.get_length()
-        player_before = game.get_current_player()
+        length_before = game.move_count()
+        player_before = game.current_player()
         explorer.run_alphazero_mcts(game, Node(0), [inference_client])
 
-        assert game.get_length() == length_before
-        assert game.get_current_player() == player_before
+        assert game.move_count() == length_before
+        assert game.current_player() == player_before
 
     def test_plays_full_game_without_illegal_moves(self, search_config, inference_client):
         explorer = Explorer(search_config)
@@ -124,8 +122,7 @@ class TestConnectFourMCTS:
             root = Node(0)
             action, _ = explorer.run_alphazero_mcts(game, root, [inference_client])
 
-            obs = game.observe()
-            mask = game.action_mask(obs)
+            mask = game.legal_actions_mask()
             assert mask[action] == 1.0, f"Illegal action {action} at move {moves}"
 
             game.step(action)
@@ -145,16 +142,11 @@ class TestConnectFourClone:
 
         clone = game.clone()
 
-        assert clone.get_current_player() == game.get_current_player()
-        assert clone.get_length() == game.get_length()
+        assert clone.current_player() == game.current_player()
+        assert clone.move_count() == game.move_count()
         assert clone.is_terminal() == game.is_terminal()
-        obs_game = game.observe()
-        obs_clone = clone.observe()
-        np.testing.assert_array_equal(game.action_mask(obs_game), clone.action_mask(obs_clone))
-        torch.testing.assert_close(
-            game.obs_to_state(obs_game, None),
-            clone.obs_to_state(obs_clone, None),
-        )
+        np.testing.assert_array_equal(game.legal_actions_mask(), clone.legal_actions_mask())
+        torch.testing.assert_close(game.encode_state(), clone.encode_state())
 
     def test_clone_is_independent(self):
         game = make_game()
@@ -163,9 +155,9 @@ class TestConnectFourClone:
         clone = game.clone()
         clone.step(0)
 
-        assert game.get_length() == 1
-        assert clone.get_length() == 2
-        assert game.get_current_player() != clone.get_current_player()
+        assert game.move_count() == 1
+        assert clone.move_count() == 2
+        assert game.current_player() != clone.current_player()
 
 
 class TestConnectFourStrategic:
@@ -181,7 +173,7 @@ class TestConnectFourStrategic:
         for _ in range(3):
             game.step(0)  # p1
             game.step(1)  # p2
-        assert game.get_current_player() == 1
+        assert game.current_player() == 1
 
         action, _ = explorer.run_alphazero_mcts(game, Node(0), [client])
         assert action == 0
@@ -198,7 +190,7 @@ class TestConnectFourStrategic:
             game.step(2)  # p2 stacks col 2
         game.step(5)  # p1 wastes
         # Now p2 to play, winning move is col 2
-        assert game.get_current_player() == 2
+        assert game.current_player() == 2
 
         action, _ = explorer.run_alphazero_mcts(game, Node(0), [client])
         assert action == 2

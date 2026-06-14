@@ -1,13 +1,12 @@
 """
 Abstract game interface for AlphaZoo.
 
-Implement `IAlphazooGame` to integrate any 2-player zero-sum game into
-AlphaZoo training. For PettingZoo environments, `PettingZooWrapper` provides
-a ready-made implementation.
+Implement `IAlphazooGame` to integrate a 2-player zero-sum game into AlphaZoo
+training. For PettingZoo environments, `PettingZooWrapper` provides a ready-made
+implementation.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any
 
 import numpy as np
 import cloudpickle
@@ -16,39 +15,37 @@ import torch
 
 class IAlphazooGame(ABC):
     """
-    Game interface that AlphaZoo requires.
-
-   `PettingZooWrapper` converts pettingZoo's envs into this interface.
+    Game contract that AlphaZoo's self-play and MCTS depend on.
     """
 
     # ------------------------------------------------------------------
-    # Game lifecycle
+    # Lifecycle
     # ------------------------------------------------------------------
 
     @abstractmethod
-    def reset(self, *args, **kwargs) -> None:
+    def reset(self) -> None:
         """Reset the game to its initial state."""
         ...
 
     @abstractmethod
-    def step(self, action: int, *args, **kwargs) -> None:
-        """Advance the next game state."""
+    def step(self, action: int) -> None:
+        """Apply `action` and advance to the next state."""
         ...
 
     @abstractmethod
     def clone(self) -> IAlphazooGame:
         """
-        Return a fully independent copy of the current game state.
-
-        Used by MCTS to explore hypothetical moves without modifying the
-        original game. Mutating the clone (or any object it owns) must not
-        affect the original, and vice versa.
-        """
+        Return a fully independent copy of the current state."""
         ...
 
     # ------------------------------------------------------------------
-    # Game state queries
+    # Position queries
     # ------------------------------------------------------------------
+
+    @abstractmethod
+    def current_player(self) -> int:
+        """Return the player to move: 1 for player 1, 2 for player 2."""
+        ...
 
     @abstractmethod
     def is_terminal(self) -> bool:
@@ -56,98 +53,79 @@ class IAlphazooGame(ABC):
         ...
 
     @abstractmethod
-    def get_terminal_value(self) -> float:
+    def terminal_value(self) -> float:
         """
-        Return final game value.
+        Return the final game value. Meaningful only once `is_terminal()` is True.
 
-        If this value is player-dependent or not, should match the `player_dependent_value` config.
-        In PettingZoo games this value is usually player dependent, this is, from the perspective of the current player.
-
-        Only meaningful after `is_terminal()` returns True.
-        """
-        ...
-
-    @abstractmethod
-    def get_current_player(self) -> int:
-        """
-        Return the 1-indexed index of the player whose turn it is.
-
-        AlphaZoo uses 1 for player 1 and 2 for player 2. Values are negated
-        during MCTS when computing UCT scores for the opposing player.
+        The perspective must match the `player_dependent_value` training config:
+        the current player's perspective when it is True, or player 1's (absolute)
+        perspective when it is False.
         """
         ...
 
     @abstractmethod
-    def get_length(self) -> int:
+    def move_count(self) -> int:
         """Return the number of moves played so far in the current game."""
         ...
 
-
     # ------------------------------------------------------------------
-    # Observation interface
+    # Neural-network interface
     # ------------------------------------------------------------------
 
     @abstractmethod
-    def observe(self) -> dict:
-        """Return a PettingZoo-like observation dict for the current player."""
+    def encode_state(self) -> torch.Tensor:
+        """Return the current position encoded as a network input tensor."""
         ...
 
     @abstractmethod
-    def obs_to_state(self, obs: dict, agent_id: Any) -> torch.Tensor:
-        """Convert a raw PettingZoo observation dict to a network input tensor."""
-        ...
-
-    @abstractmethod
-    def action_mask(self, obs: dict) -> np.ndarray:
+    def legal_actions_mask(self) -> np.ndarray:
         """
-        Extract the action mask from a raw observation dict.
+        Return a 1-D float32 mask of length `action_size()`.
 
-        Returns a float32 array of shape ``(get_action_size(),)``.
-        1.0 = legal, 0.0 = illegal.
+        1.0 marks a legal action, 0.0 an illegal one.
         """
         ...
 
-    @abstractmethod
-    def get_action_shape(self) -> tuple[int, ...]:
-        """Return the shape of the action space."""
-        ...
-    
-    @abstractmethod
-    def get_action_size(self) -> int:
-        """Return the total size of the flattened action space."""
-        ...
+    # ------------------------------------------------------------------
+    # Static game specification
+    # ------------------------------------------------------------------
 
     @abstractmethod
-    def get_state_shape(self) -> tuple[int, ...]:
+    def state_shape(self) -> tuple[int, ...]:
         """Return the shape of the network input state tensor."""
         ...
 
     @abstractmethod
-    def get_state_size(self) -> int:
-        """Return the total number of elements in the flattened state tensor."""
+    def action_shape(self) -> tuple[int, ...]:
+        """Return the shape of the action space."""
         ...
 
     # ------------------------------------------------------------------
-    # Default methods (overloadable)
+    # Defaults
     # ------------------------------------------------------------------
 
+    def state_size(self) -> int:
+        """Return the flattened length of the state tensor."""
+        return int(np.prod(self.state_shape()))
+
+    def action_size(self) -> int:
+        """Return the flattened length of the policy tensor."""
+        return int(np.prod(self.action_shape()))
+    
+    
+    # Serialization methods
+    # (override if cloudpickle is not sufficient for your env)
     @staticmethod
     def serialize(game: IAlphazooGame) -> bytes:
         """
-        Return a byte representation of the full game state.
-
-        Used to ship a game snapshot across process boundaries.
-        The returned bytes must round-trip through ``deserialize`` to a fully independent game in the same state.
-
-        Required for reanalyse.
+        Return a byte snapshot that `deserialize` restores to an independent game. Required for reanalyse.
         """
         return cloudpickle.dumps(game)
 
     @staticmethod
     def deserialize(data: bytes) -> IAlphazooGame:
         """
-        Reconstruct a game from bytes produced by ``serialize``.
-
-        Required for reanalyse.
+        Reconstruct a game from bytes produced by `serialize`. Required for reanalyse.
         """
         return cloudpickle.loads(data)
+        

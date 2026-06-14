@@ -260,8 +260,7 @@ class AlphaZoo:
         self.model = model
 
         # dummy forward pass to initialize possible lazy layers before passing the model to the hosts
-        obs = self.game.observe()
-        dummy_state = self.game.obs_to_state(obs, None)
+        dummy_state = self.game.encode_state()
         if is_recurrent:
             self.model.forward(dummy_state, iters_to_do=1)
         else:
@@ -321,9 +320,9 @@ class AlphaZoo:
         self._inference_server = IpcInferenceServer.options(num_gpus=inference_num_gpus).remote(
             self.inference_host,
             total_clients,
-            self.game.get_state_shape(),
-            self.game.get_state_size(),
-            self.game.get_action_size(),
+            self.game.state_shape(),
+            self.game.state_size(),
+            self.game.action_size(),
             cache_config,
             recurrent_config,
         )

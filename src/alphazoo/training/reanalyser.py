@@ -94,7 +94,7 @@ class Reanalyser:
             use_exploration_noise=True,
             use_action_exploration=True,
         )
-        policy = policy_from_root_visits(root_node, game.get_action_size())
+        policy = policy_from_root_visits(root_node, game.action_size())
         value = root_node.value()
         return ReanalyseResult(
             original_key=request.key,

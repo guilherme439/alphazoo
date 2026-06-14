@@ -156,7 +156,7 @@ class MCTS(ABC):
         return math.sqrt(parent.visit_count()) / (child.visit_count() + 1)
 
     def _expand_leaf_node(self, node: Node, game: IAlphazooGame) -> float:
-        value = game.get_terminal_value()
+        value = game.terminal_value()
         node.set_terminal_value(value)
         return value
 
@@ -177,7 +177,7 @@ class MCTS(ABC):
         ]
 
         if use_action_exploration:
-            if game.get_length() < self.config.exploration.number_of_softmax_moves:
+            if game.move_count() < self.config.exploration.number_of_softmax_moves:
                 action_i = self._softmax_action(visit_counts)
             else:
                 epsilon_softmax = self.rng.random()

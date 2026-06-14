@@ -52,7 +52,7 @@ class AlphazeroMCTS(MCTS):
 
     @override
     def _expand_node(self, node: Node, game: IAlphazooGame) -> float:
-        node.set_to_play(game.get_current_player())
+        node.set_to_play(game.current_player())
 
         # when a leaf node is reached for the first time
         if game.is_terminal():
@@ -72,14 +72,13 @@ class AlphazeroMCTS(MCTS):
         game: IAlphazooGame,
         inference_client: IInferenceClient,
     ) -> float:
-        obs = game.observe()
-        state = game.obs_to_state(obs, None)
+        state = game.encode_state()
         action_probs, predicted_value = inference_client.inference(state)
 
         value: float = predicted_value.item()
 
         # Expand the node.
-        valid_actions_mask = game.action_mask(obs).flatten()
+        valid_actions_mask = game.legal_actions_mask()
         action_probs = softmax(action_probs.flatten())
 
         probs = action_probs * valid_actions_mask # Use mask to get only valid moves
@@ -90,7 +89,7 @@ class AlphazeroMCTS(MCTS):
             probs += valid_actions_mask
             total = np.sum(probs)
 
-        for i in range(game.get_action_size()):
+        for i in range(game.action_size()):
             if valid_actions_mask[i]:
                 node.add_child(i, Node(probs[i] / total))
 

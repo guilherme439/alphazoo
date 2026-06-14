@@ -26,9 +26,8 @@ class GameRecord:
         self._games: list[bytes] = []
 
     def store_step(self, game: IAlphazooGame) -> None:
-        obs = game.observe()
-        self._states.append(game.obs_to_state(obs, None))
-        self._players.append(game.get_current_player())
+        self._states.append(game.encode_state())
+        self._players.append(game.current_player())
         if self._game_encoder is not None:
             self._games.append(self._game_encoder.encode(game))
 

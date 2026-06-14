@@ -51,9 +51,10 @@ Two execution modes:
 ### Game Interface (`ialphazoo_game.py`)
 
 `IAlphazooGame` ABC defines the game interface AlphaZoo needs:
-- `reset()`, `step()`, `observe()`, `obs_to_state()`, `action_mask()`
-- `is_terminal()`, `get_terminal_value()`, `clone()`
-- `get_action_shape()`, `get_action_size()`, `get_state_shape()`, `get_state_size()`, `get_length()`
+- `reset()`, `step(action)`, `clone()`
+- `is_terminal()`, `terminal_value()`, `current_player()`, `move_count()`
+- `encode_state()` (current position as a network-input tensor), `legal_actions_mask()` (1-D float32 mask over actions)
+- `state_shape()` and `action_shape()` are implemented; `state_size()` and `action_size()` are concrete defaults (product of the corresponding shape)
 - `serialize(game) -> bytes` and `deserialize(data) -> IAlphazooGame` (both `@staticmethod`; concrete defaults using `cloudpickle.dumps` / `cloudpickle.loads`; overridable for games whose state does not survive a cloudpickle round-trip). Used by `GameEncoder` on the reanalyse path.
 
 `PettingZooWrapper` (`wrappers/pettingzoo_wrapper.py`) is the default implementation of `IAlphazooGame` for PettingZoo AECEnv environments.
@@ -143,7 +144,7 @@ Loss functions (`utils/functions/loss_functions.py`): KL divergence, cross-entro
 
 Controls how the network's value output is interpreted relative to players.
 
-- **`True`** (default): Observations are ego-centric (plane 0 = current player's pieces). The network learns to output values from the current player's perspective. Both network values and terminal values from `get_terminal_value()` are negated for player 2 before backpropagation (which stores values from player 1's perspective). Training targets are also flipped for player 2 positions.
+- **`True`** (default): Observations are ego-centric (plane 0 = current player's pieces). The network learns to output values from the current player's perspective. Both network values and terminal values from `terminal_value()` are negated for player 2 before backpropagation (which stores values from player 1's perspective). Training targets are also flipped for player 2 positions.
 
 - **`False`**: Observations are absolute (same channel layout regardless of player). The network learns to output values from player 1's perspective. No negation is applied during MCTS or target generation.
 

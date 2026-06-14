@@ -91,7 +91,7 @@ class Gamer:
     def _play_game(self) -> GameRecord:
         self.game.reset()
         game = self.game
-        num_actions = game.get_action_size()
+        num_actions = game.action_size()
 
         simulation_config = self.search_config.simulation
         keep_subtree: bool = simulation_config.keep_subtree
@@ -136,8 +136,8 @@ class Gamer:
         self.metrics_recorder.scalar("rollout/final_bias", root_bias)
         self.metrics_recorder.mean("rollout/episode_len_mean", move_count)
 
-        terminal_value = game.get_terminal_value()
-        if self.player_dependent_value and game.get_current_player() != 1:
+        terminal_value = game.terminal_value()
+        if self.player_dependent_value and game.current_player() != 1:
             terminal_value = -terminal_value
         record.set_terminal_value(terminal_value)
 

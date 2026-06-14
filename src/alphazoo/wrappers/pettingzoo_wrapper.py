@@ -6,7 +6,7 @@ the interface expected by the AlphaZero algorithm.
 """
 
 import copy
-from typing import Any, override
+from typing import override
 
 import numpy as np
 import torch
@@ -29,7 +29,7 @@ class PettingZooWrapper(IAlphazooGame):
              "channels_last"). Defaults to "channels_last" (PettingZoo convention).
         network_input_format: Format the network expects ("channels_first" or
              "channels_last"). Defaults to "channels_first" (PyTorch convention).
-             When the two formats differ, obs_to_state transposes automatically.
+             When the two formats differ, encode_state transposes automatically.
         reset_env: Whether to reset ``env`` during construction. Pass False to
              attach the wrapper to an env whose current state must be preserved.
 
@@ -50,18 +50,18 @@ class PettingZooWrapper(IAlphazooGame):
             self.env.reset()
         self._step_count = 0
         self._obs_is_float32 = self._check_obs_dtype() # we check the type to avoid unnecessary convertions
-        self._action_shape, self._num_actions = self._compute_action_info()
-        self._state_shape, self._state_size = self._compute_state_info()
+        self._action_shape = self._compute_action_shape()
+        self._state_shape = self._compute_state_shape()
         
 
     @override
-    def reset(self, *args, **kwargs) -> None:
-        self.env.reset(*args, **kwargs)
+    def reset(self) -> None:
+        self.env.reset()
         self._step_count = 0
 
     @override
-    def step(self, action: int, *args, **kwargs) -> None:
-        self.env.step(action, *args, **kwargs)
+    def step(self, action: int) -> None:
+        self.env.step(action)
         self._step_count += 1
 
     @override
@@ -78,36 +78,32 @@ class PettingZooWrapper(IAlphazooGame):
         return any(self.env.terminations.values()) or any(self.env.truncations.values())
 
     @override
-    def get_terminal_value(self) -> float:
+    def terminal_value(self) -> float:
         current_agent = self.env.agent_selection
         return float(self.env.rewards[current_agent])
 
     @override
-    def get_current_player(self) -> int:
+    def current_player(self) -> int:
         current_agent = self.env.agent_selection
         return self.env.possible_agents.index(current_agent) + 1
 
     @override
-    def get_length(self) -> int:
+    def move_count(self) -> int:
         return self._step_count
 
     # ------------------------------------------------------------------
-    # Observation interface
+    # Neural-network interface & spec
     # ------------------------------------------------------------------
 
     @override
-    def observe(self) -> dict:
-        return self.env.observe(self.env.agent_selection)
-
-    @override
-    def obs_to_state(self, obs: dict, agent_id: Any) -> torch.Tensor:
+    def encode_state(self) -> torch.Tensor:
         """
-        Convert a raw PettingZoo observation dict to a network input tensor.
+        Encode the current position as a network input tensor.
 
         For 3D+ observations, transposes axes when ``observation_format`` and
-        ``network_input_format`` differ (e.g. HWC env → CHW network).
+        ``network_input_format`` differ (e.g. HWC env -> CHW network).
         """
-        observation = obs["observation"]
+        observation = self._current_obs()["observation"]
         if observation.ndim >= 3 and self._needs_transpose:
             return torch.from_numpy(
                 np.ascontiguousarray(observation.transpose(2, 0, 1), dtype=np.float32)
@@ -117,40 +113,34 @@ class PettingZooWrapper(IAlphazooGame):
         return torch.from_numpy(observation).unsqueeze(0)
 
     @override
-    def action_mask(self, obs: dict) -> np.ndarray:
+    def legal_actions_mask(self) -> np.ndarray:
+        obs = self._current_obs()
         if isinstance(obs, dict) and 'action_mask' in obs:
             return np.array(obs['action_mask'], dtype=np.float32)
-        return np.ones(self._num_actions, dtype=np.float32)
+        return np.ones(self.action_size(), dtype=np.float32)
 
     @override
-    def get_action_shape(self) -> tuple[int, ...]:
+    def action_shape(self) -> tuple[int, ...]:
         return self._action_shape
 
     @override
-    def get_action_size(self) -> int:
-        return self._num_actions
-
-    @override
-    def get_state_shape(self) -> tuple[int, ...]:
+    def state_shape(self) -> tuple[int, ...]:
         return self._state_shape
-
-    @override
-    def get_state_size(self) -> int:
-        return self._state_size
 
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
 
-    def _compute_action_info(self) -> tuple[tuple[int, ...], int]:
+    def _current_obs(self) -> dict:
+        return self.env.observe(self.env.agent_selection)
+
+    def _compute_action_shape(self) -> tuple[int, ...]:
         action_space = self.env.action_space(self.env.agent_selection)
         size = flatdim(action_space)
-        return (size,), size
+        return (size,)
 
-    def _compute_state_info(self) -> tuple[tuple[int, ...], int]:
-        state = self.obs_to_state(self.observe(), None)
-        shape = tuple(state.shape)
-        return shape, int(np.prod(shape))
+    def _compute_state_shape(self) -> tuple[int, ...]:
+        return tuple(self.encode_state().shape)
 
     def _check_obs_dtype(self) -> bool:
         agent = self.env.agent_selection

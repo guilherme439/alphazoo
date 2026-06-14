@@ -24,7 +24,7 @@ class TraditionalMCTS(MCTS):
 
     @override
     def _expand_node(self, node: Node, game: IAlphazooGame) -> float:
-        node.set_to_play(game.get_current_player())
+        node.set_to_play(game.current_player())
 
         # when a leaf node is reached for the first time
         if game.is_terminal():
@@ -39,15 +39,13 @@ class TraditionalMCTS(MCTS):
         return value
 
     def _expand_branch_node(self, node: Node, game: IAlphazooGame) -> None:
-        obs = game.observe()
-
-        valid_actions_mask: np.ndarray = game.action_mask(obs).flatten()
+        valid_actions_mask: np.ndarray = game.legal_actions_mask()
         valid_actions: np.ndarray = np.argwhere(valid_actions_mask).flatten()
         if len(valid_actions) == 0:
             return
 
         prior = 1.0 / len(valid_actions)
-        for i in range(game.get_action_size()):
+        for i in range(game.action_size()):
             if valid_actions_mask[i]:
                 node.add_child(i, Node(prior))
 
@@ -55,14 +53,12 @@ class TraditionalMCTS(MCTS):
 
     def _rollout(self, game: IAlphazooGame) -> float:
         while not game.is_terminal():
-            obs = game.observe()
-
-            valid_actions_mask: np.ndarray = game.action_mask(obs).flatten()
+            valid_actions_mask: np.ndarray = game.legal_actions_mask()
             valid_actions: np.ndarray = np.argwhere(valid_actions_mask).flatten()
             if len(valid_actions) == 0:
                 break
 
             action = int(self.rng.choice(valid_actions))
             game.step(action)
-            
-        return game.get_terminal_value()
+
+        return game.terminal_value()

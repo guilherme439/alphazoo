@@ -73,8 +73,7 @@ class TestTicTacToeMCTS:
         root = Node(0)
 
         action, _ = explorer.run_alphazero_mcts(game, root, [inference_client])
-        obs = game.observe()
-        assert game.action_mask(obs)[action] == 1.0
+        assert game.legal_actions_mask()[action] == 1.0
 
     def test_root_expands_all_9_actions(self, search_config, inference_client):
         explorer = Explorer(search_config)
@@ -88,12 +87,12 @@ class TestTicTacToeMCTS:
         explorer = Explorer(search_config)
         game = make_game()
 
-        length_before = game.get_length()
-        player_before = game.get_current_player()
+        length_before = game.move_count()
+        player_before = game.current_player()
         explorer.run_alphazero_mcts(game, Node(0), [inference_client])
 
-        assert game.get_length() == length_before
-        assert game.get_current_player() == player_before
+        assert game.move_count() == length_before
+        assert game.current_player() == player_before
 
     def test_respects_mask_after_moves(self, search_config, inference_client):
         explorer = Explorer(search_config)
@@ -103,8 +102,7 @@ class TestTicTacToeMCTS:
         game.step(0)  # top-left
         game.step(8)  # bottom-right
 
-        obs = game.observe()
-        mask = game.action_mask(obs)
+        mask = game.legal_actions_mask()
         occupied = {i for i in range(9) if mask[i] == 0.0}
         assert occupied == {0, 4, 8}
 
@@ -120,8 +118,7 @@ class TestTicTacToeMCTS:
             root = Node(0)
             action, _ = explorer.run_alphazero_mcts(game, root, [inference_client])
 
-            obs = game.observe()
-            mask = game.action_mask(obs)
+            mask = game.legal_actions_mask()
             assert mask[action] == 1.0, f"Illegal action {action} at move {moves}"
 
             game.step(action)
@@ -146,7 +143,7 @@ class TestTicTacToeStrategic:
         game.step(4)  # p1
         game.step(6)  # p2
         # p1 to play, winning move is 8
-        assert game.get_current_player() == 1
+        assert game.current_player() == 1
 
         action, _ = explorer.run_alphazero_mcts(game, Node(0), [client])
         assert action == 8
@@ -164,7 +161,7 @@ class TestTicTacToeStrategic:
         game.step(4)  # p2
         game.step(8)  # p1
         # p2 to play, winning move is 5
-        assert game.get_current_player() == 2
+        assert game.current_player() == 2
 
         action, _ = explorer.run_alphazero_mcts(game, Node(0), [client])
         assert action == 5

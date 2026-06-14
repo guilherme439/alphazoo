@@ -38,7 +38,7 @@ class TestTerminalValue:
         game.step(0)
 
         assert game.is_terminal()
-        assert game.get_terminal_value() == -1.0  # current player (p2) lost
+        assert game.terminal_value() == -1.0  # current player (p2) lost
 
     def test_connect_four_player_2_wins(self):
         game = make_connect_four()
@@ -50,7 +50,7 @@ class TestTerminalValue:
         game.step(0)
 
         assert game.is_terminal()
-        assert game.get_terminal_value() == -1.0  # current player (p1) lost
+        assert game.terminal_value() == -1.0  # current player (p1) lost
 
     def test_tictactoe_player_1_wins(self):
         game = make_tictactoe()
@@ -62,7 +62,7 @@ class TestTerminalValue:
         game.step(2)
 
         assert game.is_terminal()
-        assert game.get_terminal_value() == -1.0  # current player (p2) lost
+        assert game.terminal_value() == -1.0  # current player (p2) lost
 
     def test_tictactoe_player_2_wins(self):
         game = make_tictactoe()
@@ -75,7 +75,7 @@ class TestTerminalValue:
         game.step(5)
 
         assert game.is_terminal()
-        assert game.get_terminal_value() == -1.0  # current player (p1) lost
+        assert game.terminal_value() == -1.0  # current player (p1) lost
 
     def test_tictactoe_draw(self):
         game = make_tictactoe()
@@ -84,7 +84,7 @@ class TestTerminalValue:
             game.step(action)
 
         assert game.is_terminal()
-        assert game.get_terminal_value() == 0.0
+        assert game.terminal_value() == 0.0
 
 
 # ================================================================== #
@@ -95,62 +95,59 @@ class TestCurrentPlayer:
 
     def test_connect_four_starts_with_player_1(self):
         game = make_connect_four()
-        assert game.get_current_player() == 1
+        assert game.current_player() == 1
 
     def test_connect_four_alternates(self):
         game = make_connect_four()
-        assert game.get_current_player() == 1
+        assert game.current_player() == 1
         game.step(0)
-        assert game.get_current_player() == 2
+        assert game.current_player() == 2
         game.step(1)
-        assert game.get_current_player() == 1
+        assert game.current_player() == 1
 
     def test_tictactoe_starts_with_player_1(self):
         game = make_tictactoe()
-        assert game.get_current_player() == 1
+        assert game.current_player() == 1
 
     def test_tictactoe_alternates(self):
         game = make_tictactoe()
-        assert game.get_current_player() == 1
+        assert game.current_player() == 1
         game.step(4)
-        assert game.get_current_player() == 2
+        assert game.current_player() == 2
         game.step(0)
-        assert game.get_current_player() == 1
+        assert game.current_player() == 1
 
 
 # ================================================================== #
-#  Observe / action mask / obs_to_state                              #
+#  Encode state / legal actions                                     #
 # ================================================================== #
 
 class TestObservation:
 
-    def test_observe_returns_dict_with_expected_keys(self):
+    def test_encode_state_returns_batched_tensor(self):
         game = make_connect_four()
-        obs = game.observe()
-        assert isinstance(obs, dict)
-        assert "observation" in obs
-        assert "action_mask" in obs
+        state = game.encode_state()
+        assert isinstance(state, torch.Tensor)
+        assert state.shape[0] == 1  # batch dim
+        assert state.dtype == torch.float32
 
-    def test_action_mask_shape(self):
+    def test_legal_actions_mask_shape(self):
         game = make_connect_four()
-        obs = game.observe()
-        mask = game.action_mask(obs)
+        mask = game.legal_actions_mask()
         assert mask.shape == (7,)
         assert mask.dtype == np.float32
 
-    def test_action_mask_all_legal_at_start(self):
+    def test_legal_actions_mask_all_legal_at_start(self):
         game = make_connect_four()
-        obs = game.observe()
-        mask = game.action_mask(obs)
+        mask = game.legal_actions_mask()
         np.testing.assert_array_equal(mask, np.ones(7, dtype=np.float32))
 
-    def test_action_mask_reflects_full_column(self):
+    def test_legal_actions_mask_reflects_full_column(self):
         game = make_connect_four()
         for _ in range(3):
             game.step(0)
             game.step(0)
-        obs = game.observe()
-        mask = game.action_mask(obs)
+        mask = game.legal_actions_mask()
         assert mask[0] == 0.0
         assert all(mask[i] == 1.0 for i in range(1, 7))
 
@@ -158,19 +155,10 @@ class TestObservation:
         game = make_tictactoe()
         game.step(4)  # center
         game.step(0)  # top-left
-        obs = game.observe()
-        mask = game.action_mask(obs)
+        mask = game.legal_actions_mask()
         assert mask[4] == 0.0
         assert mask[0] == 0.0
         assert mask[1] == 1.0
-
-    def test_obs_to_state_returns_batched_tensor(self):
-        game = make_connect_four()
-        obs = game.observe()
-        state = game.obs_to_state(obs, None)
-        assert isinstance(state, torch.Tensor)
-        assert state.shape[0] == 1  # batch dim
-        assert state.dtype == torch.float32
 
 
 # ================================================================== #
@@ -180,20 +168,20 @@ class TestObservation:
 class TestMetadata:
 
     def test_connect_four_num_actions(self):
-        assert make_connect_four().get_action_size() == 7
+        assert make_connect_four().action_size() == 7
 
     def test_tictactoe_num_actions(self):
-        assert make_tictactoe().get_action_size() == 9
+        assert make_tictactoe().action_size() == 9
 
     def test_length_starts_at_zero(self):
-        assert make_connect_four().get_length() == 0
+        assert make_connect_four().move_count() == 0
 
     def test_length_increments(self):
         game = make_connect_four()
         game.step(0)
         game.step(1)
         game.step(2)
-        assert game.get_length() == 3
+        assert game.move_count() == 3
 
 
 # ================================================================== #
@@ -207,13 +195,13 @@ class TestReset:
         game.step(0)
         game.step(1)
         game.reset()
-        assert game.get_length() == 0
+        assert game.move_count() == 0
 
     def test_reset_restores_player_1(self):
         game = make_connect_four()
         game.step(0)
         game.reset()
-        assert game.get_current_player() == 1
+        assert game.current_player() == 1
 
     def test_reset_clears_terminal(self):
         game = make_tictactoe()
@@ -228,8 +216,7 @@ class TestReset:
         game.step(4)
         game.step(0)
         game.reset()
-        obs = game.observe()
-        mask = game.action_mask(obs)
+        mask = game.legal_actions_mask()
         np.testing.assert_array_equal(mask, np.ones(9, dtype=np.float32))
 
 
@@ -243,14 +230,14 @@ class TestClone:
         game = make_connect_four()
         game.step(3)
         clone = game.clone()
-        assert clone.get_current_player() == game.get_current_player()
+        assert clone.current_player() == game.current_player()
 
     def test_clone_preserves_length(self):
         game = make_connect_four()
         game.step(3)
         game.step(2)
         clone = game.clone()
-        assert clone.get_length() == game.get_length()
+        assert clone.move_count() == game.move_count()
 
     def test_clone_preserves_terminal_state(self):
         game = make_tictactoe()
@@ -258,22 +245,20 @@ class TestClone:
             game.step(action)
         clone = game.clone()
         assert clone.is_terminal()
-        assert clone.get_terminal_value() == game.get_terminal_value()
+        assert clone.terminal_value() == game.terminal_value()
 
-    def test_clone_preserves_observation(self):
+    def test_clone_preserves_encoded_state(self):
         game = make_connect_four()
         game.step(3)
         game.step(2)
         clone = game.clone()
-        obs_game = game.observe()
-        obs_clone = clone.observe()
-        np.testing.assert_array_equal(obs_game["observation"], obs_clone["observation"])
-        np.testing.assert_array_equal(obs_game["action_mask"], obs_clone["action_mask"])
+        assert torch.equal(game.encode_state(), clone.encode_state())
+        np.testing.assert_array_equal(game.legal_actions_mask(), clone.legal_actions_mask())
 
     def test_clone_is_independent(self):
         game = make_connect_four()
         game.step(3)
         clone = game.clone()
         clone.step(0)
-        assert game.get_length() == 1
-        assert clone.get_length() == 2
+        assert game.move_count() == 1
+        assert clone.move_count() == 2
