@@ -6,9 +6,7 @@ def synchronized(method: Callable) -> Callable:
     """
     Run a method while holding the instance's ``self._lock``.
 
-    The decorated class must expose a ``threading.Lock`` (or compatible context
-    manager) as ``self._lock``. Decorated methods must not call one another, since
-    a plain ``Lock`` is not re-entrant.
+    The decorated class must expose a ``threading.Lock`` (or compatible context manager) as ``self._lock``.
     """
     @functools.wraps(method)
     def wrapper(self, *args: Any, **kwargs: Any) -> Any:

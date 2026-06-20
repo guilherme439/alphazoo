@@ -26,6 +26,7 @@ dependencies = [
     "omegaconf>=2.4.0.dev0",
     "pydantic~=2.11",
     "matplotlib~=3.10",
+    "click~=8.4",
 ]
 
 [project.urls]

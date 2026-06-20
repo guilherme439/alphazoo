@@ -1,25 +1,27 @@
 import logging
 import os
+import sys
 import time
 from copy import deepcopy
 from datetime import datetime
 from typing import Any, Optional
+import click
 import ray
 from pettingzoo.utils.env import AECEnv
 from ray.actor import ActorHandle
 from ray.util import ActorPool
 
-from .internal_utils.exception_handler import ExceptionHandler
+from ._internal_utils.exception_handler import ExceptionHandler
 
 from .configs.alphazoo_config import AlphaZooConfig, AsynchronousConfig, CacheConfig, LearningConfig, RecurrentConfig, RunningConfig, SequentialConfig
 from .configs.replay_buffer_config import ReanalyseConfig
 from .configs.search_config import SearchConfig
 from .ialphazoo_game import IAlphazooGame
 from .inference.ipc import IpcInferenceClient, IpcInferenceServer
-from .internal_utils.optimizer import create_optimizer, create_scheduler, show_lr_schedule_preview, sync_optimizer_lr
-from .internal_utils.common import distribute_clients
-from .internal_utils import checkpoint
-from .internal_utils.progress import Spinner
+from ._internal_utils.optimizer import create_optimizer, create_scheduler, render_lr_schedule_preview, sync_optimizer_lr
+from ._internal_utils.common import distribute_clients
+from ._internal_utils import checkpoint
+from ._internal_utils.progress import Spinner
 from .metrics import MetricsRecorder, MetricsStore
 from .networks.interfaces import AlphaZooNet, AlphaZooRecurrentNet
 from .networks.model_host import ModelHost
@@ -66,7 +68,7 @@ class AlphaZoo:
 
         self.optimizer = create_optimizer(
             self.training_host.model,
-            config.scheduler.starting_lr,
+            config.scheduler.start_lr,
             config.optimizer
         )
         self.scheduler = create_scheduler(
@@ -118,11 +120,6 @@ class AlphaZoo:
     ) -> AlphaZoo:
         """
         Construct an instance and restore a checkpoint written by `save`.
-
-        Pass the same `model` architecture you trained with; its weights are restored from
-        the checkpoint. `model` may be omitted only when the checkpoint was written with
-        `save_model=True`, in which case the network is rebuilt from the saved `model.pt`.
-        Omitting `model` for a checkpoint that has no saved model raises.
         """
         if model is None:
             model_path = os.path.join(path, checkpoint.MODEL_FILE)
@@ -237,7 +234,7 @@ class AlphaZoo:
         logger.setLevel(logging.INFO if self.config.verbose else logging.WARNING)
         logger.info("\n")
 
-        show_lr_schedule_preview(self.config, self.scheduler, self.starting_step)
+        self._lr_schedule_preview()
 
         self._profiler: Optional[Profiler] = None
         if "ALPHAZOO_PROFILE" in os.environ:
@@ -323,6 +320,22 @@ class AlphaZoo:
             logger.info("Total run time: " + format(total_run_time / 60, '.4') + "m")
         
         
+    def _lr_schedule_preview(self) -> None:
+        if not self.config.scheduler.preview:
+            return
+        if self.config.learning.learning_method != "samples":
+            logger.info("LR schedule preview is only available for the 'samples' learning method; skipping.")
+            return
+
+        preview_path = render_lr_schedule_preview(self.config, self.scheduler, self.starting_step)
+        if preview_path is None or not sys.stdin.isatty():
+            return
+
+        logger.info("[Previewing LR] Press any key to continue. Press Esc to cancel the run.")
+        if click.getchar() == "\x1b":  # Esc
+            logger.info("Run cancelled.")
+            sys.exit(0)
+
     def _shutdown(self) -> None:
         if self.config.running.running_mode == "asynchronous":
             logger.info("Waiting for self-play actors to terminate...\n")

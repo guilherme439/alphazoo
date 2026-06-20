@@ -8,9 +8,9 @@ import torch
 from torch import Tensor, nn
 
 from alphazoo.configs.alphazoo_config import LearningConfig, RecurrentConfig
-from alphazoo.internal_utils.checkpoint import atomic_save
-from alphazoo.internal_utils.common import get_policy_loss_fn, get_value_loss_fn
-from alphazoo.internal_utils.concurrency import synchronized
+from alphazoo._internal_utils.checkpoint import atomic_save
+from alphazoo._internal_utils.common import get_policy_loss_fn, get_value_loss_fn
+from alphazoo._internal_utils.concurrency import synchronized
 
 from ..metrics import MetricsRecorder
 from ..networks.model_host import ModelHost

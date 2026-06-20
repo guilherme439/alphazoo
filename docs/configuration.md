@@ -84,11 +84,11 @@ AlphaZooConfig
 │       ├── momentum
 │       └── nesterov
 ├── scheduler: SchedulerConfig  (discriminated by `type`)
-│   ├── starting_lr
+│   ├── preview
 │   └── type: step | linear | sin
-│       ├── step    -> boundaries, gamma
-│       ├── linear  -> end_lr, steps_covered
-│       └── sin     -> center, amplitude, phase, start_period, end_period, steps_covered, floor
+│       ├── step    -> start_lr, boundaries, gamma
+│       ├── linear  -> start_lr, end_lr, steps_covered
+│       └── sin     -> min_lr, max_lr, phase, start_period, end_period, steps_covered, sweep_exponent, damping, floor
 └── search: SearchConfig
     ├── simulation: SimulationConfig
     │   ├── mcts_simulations
@@ -301,40 +301,43 @@ Controls the learning rate schedule. The `type` field selects which schedule to 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `type` | `step` / `linear` / `sin` | *(required)* | Which schedule to use. |
-| `starting_lr` | `float` | `1e-4` | Base learning rate. |
-| `show_preview` | `bool` | `false` | When `true`, `train()` opens a window with a preview of the lr schedule for the whole-run and waits until it is closed before training starts. |
+| `preview` | `bool` | `false` | When `true`, `train()` renders a whole-run preview of the lr schedule, saves it to a temporary PNG file, and logs the path before training starts. |
 
 ### step
 
-Multi-step decay: the learning rate starts at `starting_lr` and is multiplied by `gamma` each time the training step crosses a boundary.
+Multi-step decay: the learning rate starts at `start_lr` and is multiplied by `gamma` each time the training step crosses a boundary.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
+| `start_lr` | `float` | `1e-4` | Base learning rate. |
 | `boundaries` | `list[int]` | `[10000, 20000]` | Training step milestones where the learning rate decays. |
 | `gamma` | `float` | `0.2` | Multiplicative decay factor applied at each boundary. |
 
 ### linear
 
-Linear ramp from `starting_lr` to `end_lr` over `steps_covered` training steps, then held constant.
+Linear ramp from `start_lr` to `end_lr` over `steps_covered` training steps, then held constant.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
+| `start_lr` | `float` | `1e-4` | Learning rate at the start of the ramp. |
 | `end_lr` | `float` | `1e-6` | Learning rate reached at the end of the ramp. |
 | `steps_covered` | `int` | `20000` | Number of steps over which the ramp completes. |
 
 ### sin
 
-A sine wave around a baseline whose frequency sweeps from a short period to a long one. The learning rate is `starting_lr * (center + amplitude * sin(theta))`, where `theta` advances at a rate moving from one oscillation every `start_period` steps to one every `end_period` steps across `steps_covered` steps. After `steps_covered` the wave is frozen and the learning rate is held at the value it last reached.
+A sine wave whose frequency sweeps from a short period to a long one. The learning rate oscillates between `min_lr` and `max_lr` as `theta` advances at a rate moving from one oscillation every `start_period` steps to one every `end_period` steps across `steps_covered` steps, shaped by `sweep_exponent` (values below `1` front-load the slowdown, keeping early peaks sharp while stretching later ones). `damping` progressively shrinks the peaks toward `min_lr` over the sweep, and the result is cropped to a hard minimum of `floor`. After `steps_covered` the wave is frozen and the learning rate is held at the value it last reached.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `center` | `float` | `1.0` | Baseline the wave rides on, in units of `starting_lr`. |
-| `amplitude` | `float` | `0.5` | Half the peak-to-trough height, in units of `starting_lr`. |
+| `min_lr` | `float` | `5e-5` | Learning rate at the wave's trough. |
+| `max_lr` | `float` | `1.5e-4` | Learning rate at the wave's peak. |
 | `phase` | `float` | `0.0` | Horizontal shift in cycles `[0, 1)`; `0.25` turns the sine into a cosine. |
 | `start_period` | `int` | `500` | Steps per oscillation at the start (high frequency). |
 | `end_period` | `int` | `null` | Steps per oscillation at the end of the sweep (low frequency). Defaults to `start_period` (no sweep) when omitted. |
 | `steps_covered` | `int` | `20000` | Steps over which the period grows from `start_period` to `end_period`. Past this, the learning rate is held constant at its last value. |
-| `floor` | `float` | `1e-8` | Hard minimum on the resulting learning rate. |
+| `sweep_exponent` | `float` | `1.0` | Shape of the frequency ramp across `steps_covered`. `1` is a linear sweep; values below `1` front-load the slowdown so early peaks stay sharp and later peaks stretch. |
+| `damping` | `float` | `0.0` | Rate at which peak height shrinks toward `min_lr` across `steps_covered`. `0` keeps every peak at `max_lr`; `1` decays the swing fully to `min_lr` by the end. |
+| `floor` | `float` | `1e-8` | Hard minimum the learning rate is cropped to. |
 
 ---
 

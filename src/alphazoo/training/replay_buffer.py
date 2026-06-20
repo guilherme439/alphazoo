@@ -10,8 +10,8 @@ import numpy as np
 import torch
 
 from alphazoo.configs.replay_buffer_config import ReplayBufferConfig
-from alphazoo.internal_utils.checkpoint import atomic_save
-from alphazoo.internal_utils.concurrency import synchronized
+from alphazoo._internal_utils.checkpoint import atomic_save
+from alphazoo._internal_utils.concurrency import synchronized
 
 from .game_record import GameRecord
 

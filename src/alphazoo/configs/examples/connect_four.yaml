@@ -57,7 +57,7 @@ optimizer:
 
 scheduler:
   type: step
-  starting_lr: 0.001
+  start_lr: 0.001
   boundaries: [10000, 20000]
   gamma: 0.2
 
