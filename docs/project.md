@@ -99,17 +99,17 @@ Ray actors for parallelism:
 Inference is organised behind two interfaces (`IInferenceClient`, `IInferenceServer`) with three deployment-mode implementations, picked based on where the consumer runs relative to the model:
 
 - **`lpc/`** — Local Procedure Call. `LpcInferenceServer` holds an `nn.Module` and serves requests synchronously to in-process `LpcInferenceClient` instances. No Ray, no shared memory. Used for one-shot external entry points like `select_action_with_mcts_for`.
-- **`ipc/`** — Inter-Process Communication. `IpcInferenceServer` is a Ray actor on the same machine as its clients. It holds a `ModelHost` and serves inference to `IpcInferenceClient`s in other processes. Transport is owned by `InferenceSlot`: named shared memory for zero-copy tensor passing and named FIFO pipes for ready/done signalling. A single dispatcher thread waits on every slot's ready fd via `select()`, services cache hits immediately, and runs one stacked forward pass over the misses each cycle. Used by `AlphaZoo` for training-time self-play.
+- **`ipc/`** — Inter-Process Communication. `IpcInferenceServer` is a Ray actor on the same machine as its clients. It holds a `ModelHost` and serves inference to `IpcInferenceClient`s in other processes. Transport is owned by `InferenceSlot`: named shared memory for zero-copy tensor passing and named FIFO pipes for ready/done signalling. Inference runs as a three-stage pipeline so I/O overlaps GPU compute: a collector thread waits on every slot's ready fd via `epoll` and answers cache hits directly, a GPU thread drains the misses into one stacked forward pass, and a writer thread returns results to their slots; the stages are connected by queues and stopped via a sentinel hand-off. Used by `AlphaZoo` for training-time self-play.
 - **`rpc/`** — Remote Procedure Call. Reserved for multi-machine deployments; not yet implemented.
 
 Both interfaces are tiny: clients expose a single `inference(state)` returning `(policy_logits, value)`; servers expose `get_clients()` and `publish_model(state_dict)`. Whether the underlying model is recurrent and how many recurrent iterations to run are server-side settings; callers don't need to know. Consumers (e.g. `Gamer`, `Explorer`) depend only on `IInferenceClient`.
 
-Weight updates on the `IpcInferenceServer` are protected by a read-write lock: the dispatcher takes the read lock around forward + cache put for each batch; `publish_model()` takes the write lock to swap weights and invalidate the cache atomically.
+Weight updates on the `IpcInferenceServer` are protected by a read-write lock: the GPU thread takes the read lock around forward + cache put for each batch; `publish_model()` takes the write lock to swap weights and invalidate the cache atomically.
 
-### Caching (`utils/caches/`)
+### Caching (`inference/caches/`)
 
 Optional tensor caching to avoid redundant network evaluations during MCTS:
-- `KeylessCache`: direct-mapped with blake2b hashing, no key storage. Uses a generation counter for O(1) `invalidate()` — incrementing the generation makes all existing entries invisible without touching them; old slots are lazily overwritten on subsequent puts.
+- `KeylessCache`: direct-mapped with blake2b hashing, no key storage. Uses a generation counter for O(1) `invalidate()` — incrementing the generation makes all existing entries invisible without touching them; old slots are lazily overwritten on subsequent puts. Thread-safe via a pool of striped locks sized to the client count (`STRIPE_FACTOR * num_clients`, capped to the table size). Exposes `hash_state` plus `hashed_get` / `hashed_put` so the inference pipeline hashes each state once and reuses the digest for both the lookup and the later insert.
 
 ### Configuration (`configs/`)
 

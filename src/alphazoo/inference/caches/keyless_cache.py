@@ -1,13 +1,14 @@
 import hashlib
 import math
+import threading
 from typing import Any, Callable, Optional
 
 import torch
-from readerwriterlock import rwlock
 
 
 _FINGERPRINT_BITS = 128
 _MAX_INDEX_BITS = 512 - _FINGERPRINT_BITS  # blake2b max digest is 512 bits
+_STRIPE_FACTOR = 16  # stripes = STRIPE_FACTOR * num_clients, capped to [1, size]
 
 
 class KeylessCache:
@@ -23,7 +24,9 @@ class KeylessCache:
     128 bits regardless of table size. When two tensors map to the same slot,
     the newer one evicts the older.
 
-    Thread safety is provided by per-slot read-write locks (RWLockFair).
+    Thread safety is provided by a pool of striped locks: every slot maps to one
+    of ``STRIPE_FACTOR * num_clients`` locks (capped to the table size), so two
+    operations block each other only when their slots share a stripe.
 
     Invalidation uses a generation counter: each slot records the generation
     it was written in, and the cache tracks a global generation. A slot is
@@ -33,7 +36,7 @@ class KeylessCache:
     overwritten on subsequent puts.
     """
 
-    def __init__(self, max_size: int) -> None:
+    def __init__(self, max_size: int, num_clients: int) -> None:
         if max_size <= 0:
             raise ValueError("Cache size must be > 0")
 
@@ -60,34 +63,46 @@ class KeylessCache:
         self.misses = 0
         self.evictions = 0
 
-        self._rw_locks = [rwlock.RWLockFair() for _ in range(self.size)]
-        self._rlocks = [lk.gen_rlock() for lk in self._rw_locks]
-        self._wlocks = [lk.gen_wlock() for lk in self._rw_locks]
+        self._num_stripes = max(1, min(num_clients * _STRIPE_FACTOR, self.size))
+        self._locks = [threading.Lock() for _ in range(self._num_stripes)]
 
-    def get(self, key: torch.Tensor) -> Optional[Any]:
-        h = self._hash_tensor(key)
+    def hash_state(self, state: torch.Tensor) -> int:
+        array = state.contiguous().numpy()
+        raw = hashlib.blake2b(array, digest_size=self._digest_bytes).digest()
+        return int.from_bytes(raw, "little")
+    
+    def contains(self, key: torch.Tensor) -> bool:
+        h = self.hash_state(key)
         index = self._extract_index(h)
         fingerprint = self._extract_fingerprint(h)
-        with self._rlocks[index]:
+        with self._get_lock(index):
+            return self._is_occupied(index) and self.fingerprints[index] == fingerprint
+        
+    def get(self, key: torch.Tensor) -> Optional[Any]:
+        return self.hashed_get(self.hash_state(key))
+
+    def put(self, item: tuple[torch.Tensor, Any]) -> None:
+        key, value = item
+        self.hashed_put(self.hash_state(key), value)
+
+    def hashed_get(self, h: int) -> Optional[Any]:
+        """get() variant that takes a precomputed hash from hash_state(); trusts
+        the caller's hash and does not re-validate it against a state."""
+        index = self._extract_index(h)
+        fingerprint = self._extract_fingerprint(h)
+        with self._get_lock(index):
             if self._is_occupied(index) and self.fingerprints[index] == fingerprint:
                 self.hits += 1
                 return self.values[index]
             self.misses += 1
             return None
 
-    def contains(self, key: torch.Tensor) -> bool:
-        h = self._hash_tensor(key)
+    def hashed_put(self, h: int, value: Any) -> None:
+        """put() variant that takes a precomputed hash from hash_state(); trusts
+        the caller's hash and does not re-validate it against a state."""
         index = self._extract_index(h)
         fingerprint = self._extract_fingerprint(h)
-        with self._rlocks[index]:
-            return self._is_occupied(index) and self.fingerprints[index] == fingerprint
-
-    def put(self, item: tuple[torch.Tensor, Any]) -> None:
-        key, value = item
-        h = self._hash_tensor(key)
-        index = self._extract_index(h)
-        fingerprint = self._extract_fingerprint(h)
-        with self._wlocks[index]:
+        with self._get_lock(index):
             if self._is_occupied(index):
                 if self.fingerprints[index] != fingerprint:
                     self.evictions += 1
@@ -98,10 +113,10 @@ class KeylessCache:
             self.values[index] = value
 
     def get_and_put_if_absent(self, key: torch.Tensor, producer: Callable[[], Any]) -> Any:
-        h = self._hash_tensor(key)
+        h = self.hash_state(key)
         index = self._extract_index(h)
         fingerprint = self._extract_fingerprint(h)
-        with self._wlocks[index]:
+        with self._get_lock(index):
             if self._is_occupied(index) and self.fingerprints[index] == fingerprint:
                 self.hits += 1
                 return self.values[index]
@@ -136,13 +151,12 @@ class KeylessCache:
     def get_hit_ratio(self) -> float:
         total = self.hits + self.misses
         return self.hits / total if total > 0 else 0.0
-    
+
+    def _get_lock(self, index: int) -> threading.Lock:
+        return self._locks[index % self._num_stripes]
+
     def _is_occupied(self, index: int) -> bool:
         return self._slot_generations[index] == self._generation
-
-    def _hash_tensor(self, tensor: torch.Tensor) -> int:
-        raw = hashlib.blake2b(tensor.numpy().tobytes(), digest_size=self._digest_bytes).digest()
-        return int.from_bytes(raw, "little")
 
     def _extract_index(self, h: int) -> int:
         return h & self._index_mask

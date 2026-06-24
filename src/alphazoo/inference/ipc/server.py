@@ -1,4 +1,5 @@
 import os
+import queue
 import select
 import shutil
 import tempfile
@@ -30,12 +31,17 @@ class IpcInferenceServer(IInferenceServer):
 
     Each client gets an InferenceSlot that carries the shared-memory buffers
     and the FIFO signals between the two sides.
-    
-    A single dispatcher thread aits on every slot's ready fd at once via select(), drains whichever
-    slots became ready, answers cache hits immediately, and runs one stacked forward pass over the misses.
-    The stop signal joins the same select() set via an internal os.pipe().
 
-    Model updates are protected by a read-write lock: the dispatcher takes the
+    Inference runs as a three-stage pipeline so I/O overlaps GPU compute:
+    - a collector thread waits on every slot's ready fd via epoll, reads the
+      ready states, answers cache hits directly, and queues the misses;
+    - a GPU thread drains the miss queue into one stacked forward pass and
+      queues the results;
+    - a writer thread sends each result back to its slot.
+    The stop signal joins the collector's epoll set via an internal os.pipe()
+    and propagates to the later stages through queue sentinels.
+
+    Model updates are protected by a read-write lock: the GPU thread takes the
     read lock around forward + cache.put for each batch; publish_model() takes
     the write lock to swap weights and invalidate the cache atomically.
     """
@@ -55,7 +61,7 @@ class IpcInferenceServer(IInferenceServer):
         self._recurrent_iterations = recurrent_config.inference_iterations if recurrent_config else None
 
         self._cache_enabled = cache_config.enabled
-        self._cache = KeylessCache(cache_config.max_size) if self._cache_enabled else None
+        self._cache = KeylessCache(cache_config.max_size, num_clients) if self._cache_enabled else None
 
         self._model_lock = rwlock.RWLockFair()
         self._wlock = self._model_lock.gen_wlock()
@@ -79,20 +85,10 @@ class IpcInferenceServer(IInferenceServer):
         self._stop_r, self._stop_w = os.pipe()
         self._stopped = False
         self._fd_to_slot: dict[int, int] = {}
+        self._epoll: Optional[select.epoll] = None
+        self._request_q: queue.Queue = queue.Queue()
+        self._result_q: queue.Queue = queue.Queue()
         self.recorder = MetricsRecorder()
-
-    def run(self) -> None:
-        for i, slot in enumerate(self._slots):
-            slot.open_for_server()
-            self._fd_to_slot[slot.ready_fd()] = i
-
-        dispatcher = threading.Thread(target=self._serve, daemon=True)
-        dispatcher.start()
-        dispatcher.join()
-        self._cleanup()
-
-    def get_pid(self) -> int:
-        return os.getpid()
 
     @override
     def get_clients(self) -> list[IpcInferenceClient]:
@@ -105,6 +101,30 @@ class IpcInferenceServer(IInferenceServer):
             if self._cache_enabled:
                 self._cache.invalidate()
 
+    def run(self) -> None:
+        for i, slot in enumerate(self._slots):
+            slot.open_for_server()
+            self._fd_to_slot[slot.ready_fd()] = i
+
+        self._epoll = select.epoll()
+        for fd in self._fd_to_slot:
+            self._epoll.register(fd, select.EPOLLIN)
+        self._epoll.register(self._stop_r, select.EPOLLIN)
+
+        threads = [
+            threading.Thread(target=self._collect_stage, daemon=True),
+            threading.Thread(target=self._inference_stage, daemon=True),
+            threading.Thread(target=self._dispatch_stage, daemon=True),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self._cleanup()
+
+    def get_pid(self) -> int:
+        return os.getpid()
+   
     def get_metrics(self) -> dict:
         if self._cache_enabled:
             self.recorder.scalar("inference/cache_hit_ratio", self._cache.get_hit_ratio())
@@ -119,65 +139,85 @@ class IpcInferenceServer(IInferenceServer):
         self._stopped = True
         os.write(self._stop_w, b'\x01')
 
-    def _serve(self) -> None:
-        rlock = self._model_lock.gen_rlock()
+    def _collect_stage(self) -> None:
         while not self._stopped:
-            misses = self._collect_one_batch()
-            if misses:
-                self._forward_and_dispatch(misses, rlock)
+            events = self._epoll.poll()
+            self.recorder.mean("inference/cycle_size", float(len(events)))
+            for fd, _ in events:
+                if fd == self._stop_r:
+                    self._stopped = True
+                    break
+                slot_idx = self._fd_to_slot[fd]
+                state = self._slots[slot_idx].receive_state(self._state_shape)
+                hashed = None
+                if self._cache_enabled:
+                    hashed = self._cache.hash_state(state)
+                    hit = self._cache.hashed_get(hashed)
+                    if hit is not None:
+                        self._result_q.put((slot_idx, hit[0], hit[1]))
+                        continue
+                self._request_q.put((slot_idx, state, hashed))
+        self._request_q.put(None)  # sentinel
 
-    def _collect_one_batch(self) -> list[tuple[int, torch.Tensor]]:
-        misses: list[tuple[int, torch.Tensor]] = []
-        watch = [slot.ready_fd() for slot in self._slots] + [self._stop_r]
-        readable, _, _ = select.select(watch, [], [])
-        if self._stop_r in readable:
-            self._stopped = True
-            return misses
+    def _inference_stage(self) -> None:
+        rlock = self._model_lock.gen_rlock()
+        while True:
+            batch = self._next_request_batch()
+            if batch is None:
+                break
+            self._forward_batch(batch, rlock)
+        self._result_q.put(None)  # sentinel
 
-        self.recorder.mean("inference/cycle_size", float(len(readable)))
-        for fd in readable:
-            slot_idx = self._fd_to_slot[fd]
-            state = self._slots[slot_idx].receive_state(self._state_shape)
-            hit = self._lookup_cache(state)
-            if hit is not None:
-                self._dispatch(slot_idx, hit[0], hit[1])
-            else:
-                misses.append((slot_idx, state))
+    def _dispatch_stage(self) -> None:
+        while True:
+            item = self._result_q.get()
+            if item is None:
+                return
+            slot_idx, policy, value = item
+            self._slots[slot_idx].send_result(policy, value)
 
-        return misses
-
-    def _lookup_cache(self, state: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor] | None:
-        if not self._cache_enabled:
+    # FIXME: make this function easier to read and remove unnecessary "put None into the request queue" cases.
+    def _next_request_batch(self) -> Optional[list[tuple[int, torch.Tensor, Optional[int]]]]:
+        """Block for one request, then drain everything immediately available.
+        Returns None once the stop sentinel is reached."""
+        first = self._request_q.get()
+        if first is None:
             return None
-        return self._cache.get(state)
+        batch = [first]
+        while True:
+            try:
+                item = self._request_q.get_nowait()
+            except queue.Empty:
+                break
+            if item is None:
+                self._request_q.put(None)  # restore sentinel for the next call
+                break
+            batch.append(item)
+        return batch
 
-    def _forward_and_dispatch(
+    def _forward_batch(
         self,
-        misses: list[tuple[int, torch.Tensor]],
+        batch: list[tuple[int, torch.Tensor, Optional[int]]],
         rlock,
     ) -> None:
-        self.recorder.mean("inference/bucket_size", float(len(misses)))
+        self.recorder.mean("inference/bucket_size", float(len(batch)))
 
-        states = [state for _, state in misses]
-        batch = torch.cat(states, dim=0)
+        states = [state for _, state, _ in batch]
+        stacked = torch.cat(states, dim=0)
         with rlock:
             if self._is_recurrent:
-                (policies, values), _ = self._model_host.recurrent_forward(batch, self._recurrent_iterations)
+                (policies, values), _ = self._model_host.recurrent_forward(stacked, self._recurrent_iterations)
             else:
-                policies, values = self._model_host.forward(batch)
+                policies, values = self._model_host.forward(stacked)
 
             policies = policies.detach().cpu()
             values = values.detach().cpu()
             if self._cache_enabled:
-                for (_, state), policy, value in zip(misses, policies, values):
-                    self._cache.put((state, (policy, value)))
+                for (_, _, hashed), policy, value in zip(batch, policies, values):
+                    self._cache.hashed_put(hashed, (policy, value))
 
-        for (slot_idx, _), policy, value in zip(misses, policies, values):
-            self._dispatch(slot_idx, policy, value)
-
-    def _dispatch(self, slot_idx: int, policy: torch.Tensor, value: torch.Tensor) -> None:
-        slot: InferenceSlot = self._slots[slot_idx]
-        slot.send_result(policy, value)
+        for (slot_idx, _, _), policy, value in zip(batch, policies, values):
+            self._result_q.put((slot_idx, policy, value))
 
     def _create_slot_and_client(
         self,
@@ -207,6 +247,8 @@ class IpcInferenceServer(IInferenceServer):
         return slot, client
 
     def _cleanup(self) -> None:
+        if self._epoll is not None:
+            self._epoll.close()
         os.close(self._stop_r)
         os.close(self._stop_w)
         for slot in self._slots:
