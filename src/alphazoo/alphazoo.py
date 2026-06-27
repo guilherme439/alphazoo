@@ -437,7 +437,7 @@ class AlphaZoo:
             cache_config,
             recurrent_config,
         )
-        self._server_future = self._inference_server.run.remote()
+        self._server_future = self._inference_server.start.remote()
 
     def _build_game_encoder(self, reanalyse_config: ReanalyseConfig) -> None:
         self._game_encoder: Optional[GameEncoder] = None

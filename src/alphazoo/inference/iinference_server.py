@@ -10,3 +10,9 @@ class IInferenceServer(ABC):
 
     @abstractmethod
     def publish_model(self, state_dict: dict) -> None: ...
+
+    @abstractmethod
+    def start(self) -> None: ...
+
+    @abstractmethod
+    def stop(self) -> None: ...

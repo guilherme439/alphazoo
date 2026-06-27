@@ -38,6 +38,14 @@ class LpcInferenceServer(IInferenceServer):
         self._model.load_state_dict(state_dict)
         self._model.eval()
 
+    @override
+    def start(self) -> None:
+        pass
+
+    @override
+    def stop(self) -> None:
+        pass
+
     def inference(self, state: Tensor) -> tuple[Tensor, Tensor]:
         with torch.no_grad():
             if self._is_recurrent:
