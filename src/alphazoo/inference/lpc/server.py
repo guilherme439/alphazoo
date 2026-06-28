@@ -1,55 +1,21 @@
-from typing import override
+from typing import Optional
 
-import torch
-from torch import Tensor, nn
-
-from ..iinference_client import IInferenceClient
-from ..iinference_server import IInferenceServer
-from .client import LpcInferenceClient
+from ...configs.alphazoo_config import RecurrentConfig
+from ...networks.model_host import ModelHost
+from ..server import InferenceServer
+from .server_replica import LpcInferenceReplica
 
 
-class LpcInferenceServer(IInferenceServer):
-    """
-    Local Procedure Call inference server.
-    Holds a single model and serves inference requests synchronously to in-process clients.
-    The Lpc client/server pair are abstractions around the model itself, fitted to
-    the client/server interface the rest of the system uses.
+class LpcInferenceServer(InferenceServer):
+    """In-process inference server. Wraps a single LpcInferenceReplica that
+    serves its clients synchronously in the caller's own process.
     """
 
     def __init__(
         self,
-        model: nn.Module,
+        model_host: ModelHost,
         num_clients: int = 1,
-        is_recurrent: bool = False,
-        recurrent_iterations: int = 1,
+        recurrent_config: Optional[RecurrentConfig] = None,
     ) -> None:
-        self._model = model
-        self._is_recurrent = is_recurrent
-        self._recurrent_iterations = recurrent_iterations
-        self._model.eval()
-        self._clients: list[LpcInferenceClient] = [LpcInferenceClient(self) for _ in range(num_clients)]
-
-    @override
-    def get_clients(self) -> list[IInferenceClient]:
-        return list(self._clients)
-
-    @override
-    def publish_model(self, state_dict: dict) -> None:
-        self._model.load_state_dict(state_dict)
-        self._model.eval()
-
-    @override
-    def start(self) -> None:
-        pass
-
-    @override
-    def stop(self) -> None:
-        pass
-
-    def inference(self, state: Tensor) -> tuple[Tensor, Tensor]:
-        with torch.no_grad():
-            if self._is_recurrent:
-                (policy, value), _ = self._model(state, self._recurrent_iterations, None)
-            else:
-                policy, value = self._model(state)
-        return policy.reshape(1, -1), value.reshape(1, -1)
+        iterations = recurrent_config.inference_iterations if recurrent_config else 1
+        self._replicas = [LpcInferenceReplica(model_host, num_clients=num_clients, recurrent_iterations=iterations)]

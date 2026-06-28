@@ -14,11 +14,14 @@ from ray.util import ActorPool
 
 from .core.exception_handler import ExceptionHandler
 
-from .configs.alphazoo_config import AlphaZooConfig, AsynchronousConfig, CacheConfig, LearningConfig, RecurrentConfig, RunningConfig, SequentialConfig
+from .configs.alphazoo_config import AlphaZooConfig, AsynchronousConfig, CacheConfig, RecurrentConfig, RunningConfig, SequentialConfig
 from .configs.replay_buffer_config import ReanalyseConfig
 from .configs.search_config import SearchConfig
 from .ialphazoo_game import IAlphazooGame
 from .inference.iinference_client import IInferenceClient
+from .inference.server import InferenceServer
+from .inference.ipc import IpcInferenceServer
+from .inference.rpc import RpcInferenceServer
 from ._internal_utils.inference import InferenceUtils
 from ._internal_utils.optimization import OptimizationUtils
 from ._internal_utils.common import CommonUtils
@@ -353,12 +356,14 @@ class AlphaZoo:
 
         self._build_game_encoder(reanalyse_config)
 
-        total_clients = num_gamers * threads_per_gamer + num_reanalysers * threads_per_reanalyser
-        self._start_inference_server(total_clients, cache_config, recurrent_config)
+        worker_client_counts = (
+            [threads_per_gamer] * num_gamers + [threads_per_reanalyser] * num_reanalysers
+        )
+        self._start_inference_server(worker_client_counts, cache_config, recurrent_config)
         if self._profiler:
-            self._profiler.attach("inference_server", [self._inference_server])
+            self._profiler.attach("inference_server", self._inference_server.get_pids())
 
-        inference_clients = ray.get(self._inference_server.get_clients.remote())
+        inference_clients = self._inference_server.get_clients()
         gamer_clients, reanalyser_clients = CommonUtils.distribute_clients(
             inference_clients,
             num_gamers,
@@ -368,7 +373,7 @@ class AlphaZoo:
         )
         self._gamers: list[ActorHandle] = self._create_gamers(gamer_clients, main_search_config)
         if self._profiler:
-            self._profiler.attach("gamer", self._gamers)
+            self._profiler.attach("gamer", ray.get([gamer.get_pid.remote() for gamer in self._gamers]))
 
         self._reanalyse_coordinator: Optional[ActorHandle] = None
         if self._reanalyse_enabled:
@@ -378,19 +383,30 @@ class AlphaZoo:
 
     def _start_inference_server(
         self,
-        total_clients: int,
+        worker_client_counts: list[int],
         cache_config: CacheConfig,
         recurrent_config: RecurrentConfig,
     ) -> None:
-        self._inference_server = InferenceUtils.create_server(
-            self.config.running.inference_backend,
-            self.inference_host,
-            total_clients,
-            self.game,
-            cache_config,
-            recurrent_config,
-        )
-        self._server_future = self._inference_server.start.remote()
+        backend = InferenceUtils.resolve_backend(self.config.running.inference_backend)
+        inference_gpus = self.config.running.inference_gpus
+        if backend == "rpc":
+            self._inference_server: InferenceServer = RpcInferenceServer(
+                self.inference_host,
+                worker_client_counts,
+                cache_config,
+                recurrent_config,
+                inference_gpus,
+            )
+        else:
+            self._inference_server = IpcInferenceServer(
+                self.inference_host,
+                worker_client_counts,
+                self.game,
+                cache_config,
+                recurrent_config,
+                inference_gpus,
+            )
+        self._inference_server.start()
 
     def _build_game_encoder(self, reanalyse_config: ReanalyseConfig) -> None:
         self._game_encoder: Optional[GameEncoder] = None
@@ -431,7 +447,7 @@ class AlphaZoo:
 
         if self._profiler:
             workers = ray.get(coordinator.get_workers.remote())
-            self._profiler.attach("reanalyser", workers)
+            self._profiler.attach("reanalyser", ray.get([worker.get_pid.remote() for worker in workers]))
 
         return coordinator
 
@@ -504,7 +520,7 @@ class AlphaZoo:
     
     def _publish_model(self) -> None:
         state_dict = self.trainer.get_model_state_dict()
-        ray.get(self._inference_server.publish_model.remote(state_dict))
+        self._inference_server.publish_model(state_dict)
 
     def _get_metrics(self) -> dict:
         return self.recorder.drain()
@@ -525,8 +541,8 @@ class AlphaZoo:
             gamer.get_metrics.remote()
             for gamer in self._gamers
         ]
-        futures.append(self._inference_server.get_metrics.remote())
         remote_metrics = ray.get(futures)
+        inference_metrics = self._inference_server.get_metrics()
 
         self.recorder.scalar("step", step)
         self.recorder.scalar("rollout/games", games_this_step)
@@ -542,7 +558,7 @@ class AlphaZoo:
             self.trainer.get_metrics(),
             self._get_metrics(),
         ]
-        self.metrics_store.ingest(remote_metrics + local_metrics)
+        self.metrics_store.ingest(remote_metrics + inference_metrics + local_metrics)
 
         return self.metrics_store.get_public(), self.metrics_store.get_internal()
 
@@ -578,7 +594,7 @@ class AlphaZoo:
             )
 
         if cache_config.enabled:
-            cache_size = ray.get(self._inference_server.get_cache_size.remote())
+            cache_size = self._inference_server.get_cache_size()
             logger.info(f"-Using cache for inference results (size: {cache_size}).")
         if self.training_host.device().startswith("cuda"):
             logger.info("-GPU: " + self.training_host.device_name())
@@ -647,8 +663,7 @@ class AlphaZoo:
             for result in results:
                 self.replay_buffer.apply_reanalyse_result(result, self.current_step)
 
-        self._inference_server.stop.remote()
-        ray.get(self._server_future)
+        self._inference_server.stop()
 
         self._collect_final_metrics()
         if self._profiler:

@@ -1,8 +1,10 @@
 from pettingzoo.utils.env import AECEnv
 from torch import nn
 
+from ..configs.alphazoo_config import RecurrentConfig
 from ..configs.search_config import SearchConfig
 from ..inference.lpc import LpcInferenceServer
+from ..networks.model_host import ModelHost
 from ..search.explorer import Explorer
 from ..search.mcts.node import Node
 from ..envs.pettingzoo_wrapper import PettingZooWrapper
@@ -30,10 +32,8 @@ def select_action_with_alphazero_mcts(
         reset_env=False,
     )
     server = LpcInferenceServer(
-        model,
-        num_clients=1,
-        is_recurrent=is_recurrent,
-        recurrent_iterations=recurrent_iterations,
+        ModelHost(model, training=False),
+        recurrent_config=RecurrentConfig(inference_iterations=recurrent_iterations) if is_recurrent else None,
     )
     explorer = Explorer(search_config)
     root = Node(prior=0.0)

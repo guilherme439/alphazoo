@@ -5,7 +5,7 @@ from torch import Tensor
 from ..iinference_client import IInferenceClient
 
 if TYPE_CHECKING:
-    from .server import LpcInferenceServer
+    from .server_replica import LpcInferenceReplica
 
 
 class LpcInferenceClient(IInferenceClient):
@@ -14,7 +14,7 @@ class LpcInferenceClient(IInferenceClient):
     server synchronously, in-process.
     """
 
-    def __init__(self, server: LpcInferenceServer) -> None:
+    def __init__(self, server: LpcInferenceReplica) -> None:
         self._server = server
 
     @override

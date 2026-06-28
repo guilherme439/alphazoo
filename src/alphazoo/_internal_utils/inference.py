@@ -1,14 +1,7 @@
 import logging
-from typing import Optional
 
 import ray
-from ray.actor import ActorHandle
-
-from ..configs.alphazoo_config import CacheConfig, RecurrentConfig
-from ..ialphazoo_game import IAlphazooGame
-from ..inference.ipc import IpcInferenceServer
-from ..inference.rpc import RpcInferenceServer
-from ..networks.model_host import ModelHost
+import torch
 
 logger = logging.getLogger("alphazoo")
 
@@ -16,54 +9,36 @@ logger = logging.getLogger("alphazoo")
 class InferenceUtils:
 
     @staticmethod
-    def resolve_inference_backend(backend: str) -> str:
-        """Map the configured backend to a concrete transport ("ipc" or "rpc").
+    def count_compute_gpus() -> int:
+        """Number of discrete (non-integrated) CUDA/HIP devices visible to torch.
 
-        "auto" picks "rpc" when Ray reports more than one live node and "ipc"
-        otherwise.
+        Integrated GPUs are excluded: they share their architecture with the CPU
+        and cannot run the compute kernels the model relies on.
+        """
+        if not torch.cuda.is_available():
+            return 0
+        return sum(
+            1 for index in range(torch.cuda.device_count())
+            if not torch.cuda.get_device_properties(index).is_integrated
+        )
+
+    @staticmethod
+    def resolve_backend(backend: str) -> str:
+        """Map "auto" to a concrete transport: "rpc" when Ray reports more than
+        one live node, else "ipc". Any explicit backend is returned unchanged.
         """
         if backend != "auto":
             return backend
 
+        InferenceUtils.ensure_ray_initialized()
+        alive_nodes = sum(1 for node in ray.nodes() if node["Alive"])
+        return "rpc" if alive_nodes > 1 else "ipc"
+
+    @staticmethod
+    def ensure_ray_initialized() -> None:
         if not ray.is_initialized():
             logger.warning(
                 "Ray was not initialized; AlphaZoo expects ray to be initialized before "
                 "calling train(). Starting a local single-node Ray."
             )
             ray.init()
-
-        alive_nodes = sum(1 for node in ray.nodes() if node["Alive"])
-        return "rpc" if alive_nodes > 1 else "ipc"
-
-    @staticmethod
-    def create_server(
-        backend: str,
-        inference_host: ModelHost,
-        total_clients: int,
-        game: IAlphazooGame,
-        cache_config: CacheConfig,
-        recurrent_config: Optional[RecurrentConfig],
-    ) -> ActorHandle:
-        transport = InferenceUtils.resolve_inference_backend(backend)
-        num_gpus = 1 if inference_host.device().startswith("cuda") else 0
-
-        if transport == "rpc":
-            return RpcInferenceServer.options(
-                num_gpus=num_gpus,
-                max_concurrency=total_clients + RpcInferenceServer.CONCURRENCY_RESERVE,
-            ).remote(
-                inference_host,
-                total_clients,
-                cache_config,
-                recurrent_config,
-            )
-
-        return IpcInferenceServer.options(num_gpus=num_gpus).remote(
-            inference_host,
-            total_clients,
-            game.state_shape(),
-            game.state_size(),
-            game.action_size(),
-            cache_config,
-            recurrent_config,
-        )

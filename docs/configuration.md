@@ -41,6 +41,7 @@ AlphaZooConfig
 ├── running: RunningConfig
 │   ├── running_mode
 │   ├── inference_backend
+│   ├── inference_gpus
 │   ├── num_gamers
 │   ├── training_steps
 │   ├── sequential: SequentialConfig
@@ -155,6 +156,7 @@ Controls self-play execution, parallelism, and early-game exploration.
 |-------|------|---------|-------------|
 | `running_mode` | `"sequential"` \| `"asynchronous"` | `"sequential"` | Self-play execution mode. See [Running Modes](#running-modes). |
 | `inference_backend` | `"auto"` \| `"ipc"` \| `"rpc"` | `"auto"` | Inference transport: `ipc` (shared memory, single machine) or `rpc` (Ray method calls, multi-node). `auto` picks `rpc` when Ray reports more than one live node, else `ipc`. |
+| `inference_gpus` | `int` \| `null` | `null` | Number of inference replicas, one per GPU, that share the self-play load. `null` uses every discrete GPU (integrated GPUs are skipped). An explicit value is capped at that count and at the number of self-play workers. |
 | `num_gamers` | `int` | `4` | Number of Ray Gamer actors for self-play. |
 | `training_steps` | `int` | `1000` | Total training steps. |
 

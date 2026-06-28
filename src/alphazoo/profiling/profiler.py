@@ -8,9 +8,6 @@ import subprocess
 from collections import defaultdict
 from typing import Optional
 
-import ray
-from ray.actor import ActorHandle
-
 logger = logging.getLogger("alphazoo")
 
 _THREAD_NAME_RE = re.compile(r'^Thread \d+ "(.*)"$')
@@ -18,7 +15,7 @@ _THREAD_FRAME_RE = re.compile(r'^thread \(\d+\)(.*)$')
 
 
 class Profiler:
-    """Spawns and manages py-spy subprocesses attached to the main process and Ray actors.
+    """Spawns and manages py-spy subprocesses attached to processes by PID.
 
     Each target PID gets its own py-spy `record` subprocess that writes a speedscope JSON file into `output_dir`.
     Subprocesses are stopped gracefully with SIGINT so py-spy flushes the captured profile to disk.
@@ -41,10 +38,9 @@ class Profiler:
     def start_main(self) -> None:
         self._spawn("main", "main", os.getpid())
 
-    def attach(self, group_name: str, actors: list[ActorHandle]) -> None:
-        if not actors:
+    def attach(self, group_name: str, pids: list[int]) -> None:
+        if not pids:
             return
-        pids: list[int] = ray.get([actor.get_pid.remote() for actor in actors])
         is_unique = (len(pids) == 1)
         for i, pid in enumerate(pids):
             name = group_name if is_unique else f"{group_name}_{i}"

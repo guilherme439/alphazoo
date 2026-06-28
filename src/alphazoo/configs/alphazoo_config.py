@@ -25,6 +25,7 @@ class AsynchronousConfig:
 class RunningConfig:
     running_mode: Literal["sequential", "asynchronous"] = "sequential"
     inference_backend: Literal["auto", "ipc", "rpc"] = "auto"
+    inference_gpus: Optional[int] = None
     num_gamers: int = 4
     training_steps: int = 1000
     sequential: SequentialConfig = field(default_factory=SequentialConfig)

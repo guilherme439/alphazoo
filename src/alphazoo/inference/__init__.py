@@ -1,5 +1,7 @@
 from .iinference_client import IInferenceClient
-from .iinference_server import IInferenceServer
-from .lpc import LpcInferenceClient, LpcInferenceServer
-from .ipc import InferenceSlot, IpcInferenceClient, IpcInferenceServer
-from .rpc import RpcInferenceClient, RpcInferenceServer
+from .iinference_replica import IInferenceReplica
+from .remote_replica import RemoteInferenceReplica
+from .server import InferenceServer
+from .lpc import LpcInferenceClient, LpcInferenceReplica, LpcInferenceServer
+from .ipc import InferenceSlot, IpcInferenceClient, IpcInferenceReplica, IpcInferenceServer
+from .rpc import RpcInferenceClient, RpcInferenceReplica, RpcInferenceServer
