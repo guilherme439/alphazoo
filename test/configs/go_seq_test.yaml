@@ -1,16 +1,14 @@
 verbose: true
 
 running:
-  running_mode: "asynchronous"
-  num_gamers: 2
+  running_mode: "sequential"
+  num_gamers: 1
   training_steps: 3
-  asynchronous:
-    update_delay: 10
-    min_num_games: 2
+  sequential:
+    num_games_per_step: 2
 
 cache:
-  enabled: true
-  max_size: 500
+  enabled: false
 
 data:
   player_dependent_value: true
@@ -19,21 +17,16 @@ learning:
   replay_buffer:
     window_size: 500
     leak_chance: 0.0
-  learning_method: "samples"
-  value_loss: "AE"
-  policy_loss: "CE"
-  normalize_ce: true
-  samples:
-    batch_size: 16
-    num_samples: 8
-    late_heavy: true
+  learning_method: "epochs"
+  value_loss: "SE"
+  policy_loss: "KLD"
+  normalize_ce: false
+  epochs:
+    batch_size: 32
+    learning_epochs: 1
 
 optimizer:
-  type: "SGD"
-  sgd:
-    weight_decay: 0.0001
-    momentum: 0.9
-    nesterov: true
+  type: "Adam"
 
 scheduler:
   type: sin
@@ -45,7 +38,7 @@ scheduler:
 search:
   simulation:
     mcts_simulations: 8
-    keep_subtree: true
+    keep_subtree: false
   uct:
     pb_c_base: 10000
     pb_c_init: 1.15
@@ -54,6 +47,6 @@ search:
     epsilon_softmax_exploration: 0.04
     epsilon_random_exploration: 0.003
     value_factor: 1.0
-    root_exploration_distribution: "gamma"
+    root_exploration_distribution: "dirichlet"
     root_exploration_fraction: 0.25
-    root_dist_alpha: 0.15
+    root_dist_alpha: 0.3

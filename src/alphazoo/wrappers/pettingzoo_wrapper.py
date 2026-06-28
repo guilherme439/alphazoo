@@ -6,7 +6,7 @@ the interface expected by the AlphaZero algorithm.
 """
 
 import copy
-from typing import override
+from typing import Any, override
 
 import numpy as np
 import torch
@@ -158,7 +158,7 @@ class PettingZooWrapper(IAlphazooGame):
     Welcome to hell.
     Yes this code is ugly. Some genius at openAI once decided the make
     all envs extend from EzPickle. EzPickle makes it so that state is not
-    preserved when copying/pickling enviorments because it overrides
+    preserved when copying/pickling environments because it overrides
     __setstate__ and __getstate__. I have tried everything I could think of
     to get around the problem and nothing worked other than this.
     The magnificent Thor hammer below was the code Claude wrote to get around the problem.
@@ -166,13 +166,23 @@ class PettingZooWrapper(IAlphazooGame):
     It seems to work. Claude says it works almost everytime. He left a note for you to read.
 
     Note on state preservation across copy/pickle:
-        ``__getstate__`` / ``__setstate__`` decompose the env layer chain into
-        ``(class, attrs)`` specs and rebuild it via ``object.__new__``. This
-        bypasses ``gymnasium.utils.EzPickle``'s destructive ``__setstate__``,
-        so ``copy.deepcopy(wrapper)`` and ``cloudpickle.dumps(wrapper)`` both
-        preserve runtime state. The one case this does not handle is an
-        EzPickle env stored as a *value* in another layer's ``__dict__``;
-        standard PettingZoo envs do not have this structure.
+        ``__getstate__`` decomposes the env layer chain into ``(class, attrs)``
+        specs. Both copy and pickle rebuild the wrapper layers via
+        ``object.__new__``, bypassing ``gymnasium.utils.EzPickle``'s destructive
+        ``__setstate__``, so runtime state survives.
+
+        Copy and pickle differ only in how the base env is rebuilt. ``__deepcopy__``
+        stays within the current process and rebuilds the base env via
+        ``object.__new__`` as well, keeping clone() cheap for search. ``__setstate__``
+        may run in another process, where any process-global state the base env
+        established in its ``__init__`` is absent;
+        it reconstructs the base env through its real ``__init__`` from the
+        stored EzPickle args to re-establish that global state, then overlays the
+        saved runtime attributes.
+
+        The one case this does not handle is an EzPickle env stored as a *value* in
+        another layer's ``__dict__``; standard PettingZoo envs do not have this
+        structure.
 
                                                                                                       
                                                         ████████                                  
@@ -232,10 +242,20 @@ class PettingZooWrapper(IAlphazooGame):
         ]
 
     def __setstate__(self, specs: list[tuple[type, dict]]) -> None:
-        rebuilt = self._rebuild_layer_chain(specs)
+        rebuilt = self._rebuild_layer_chain(specs, reinitialize_base_env=True)
         self.__dict__.update(rebuilt.__dict__)
 
-    
+    def __deepcopy__(self, memo: dict) -> "PettingZooWrapper":
+        clone = object.__new__(type(self))
+        memo[id(self)] = clone
+        specs = [
+            (type(layer), {k: copy.deepcopy(v, memo) for k, v in vars(layer).items() if k != 'env'})
+            for layer in self._walk_layer_chain(self)
+        ]
+        rebuilt = self._rebuild_layer_chain(specs, reinitialize_base_env=False)
+        clone.__dict__.update(rebuilt.__dict__)
+        return clone
+
     def _walk_layer_chain(self, root: Any) -> list[Any]:
         layers = []
         cur = root
@@ -246,10 +266,14 @@ class PettingZooWrapper(IAlphazooGame):
             cur = cur.env
         return layers
 
-    def _rebuild_layer_chain(self, specs: list[tuple[type, dict]]) -> Any:
+    def _rebuild_layer_chain(self, specs: list[tuple[type, dict]], reinitialize_base_env: bool) -> Any:
         prev: Any = None
-        for layer_type, attrs in reversed(specs):
-            layer = object.__new__(layer_type)
+        for index, (layer_type, attrs) in enumerate(reversed(specs)):
+            is_base_env = (index == 0)
+            if is_base_env and reinitialize_base_env and '_ezpickle_args' in attrs:
+                layer = layer_type(*attrs['_ezpickle_args'], **attrs.get('_ezpickle_kwargs', {}))
+            else:
+                layer = object.__new__(layer_type)
             for attr_name, attr_value in attrs.items():
                 setattr(layer, attr_name, attr_value)
             if prev is not None:

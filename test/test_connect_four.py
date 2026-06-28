@@ -13,6 +13,8 @@ from alphazoo.configs.alphazoo_config import AlphaZooConfig
 from alphazoo.networks import AlphaZooNet
 from alphazoo import AlphaZoo
 
+from .utils.end_to_end_test import EndToEndTest
+
 
 class ConnectFourNet(AlphaZooNet):
     """Expects CHW input (1, 2, 6, 7)."""
@@ -33,81 +35,34 @@ class ConnectFourNet(AlphaZooNet):
         return self.policy_head(x), torch.tanh(self.value_head(x))
 
 
-def test_connect_four_seq() -> None:
-    config_path = os.path.join(
-        os.path.dirname(__file__), "configs", "connect_four_seq_test.yaml"
-    )
-    config = AlphaZooConfig.from_yaml(config_path)
-    model = ConnectFourNet()
+class TestConnectFour(EndToEndTest):
 
-    trainer = AlphaZoo(
-        env=connect_four_v3.env(),
-        config=config,
-        model=model,
-    )
+    def test_connect_four_seq(self) -> None:
+        config_path = os.path.join(os.path.dirname(__file__), "configs", "connect_four_seq_test.yaml")
+        config = AlphaZooConfig.from_yaml(config_path)
+        trainer = AlphaZoo(env=connect_four_v3.env(), config=config, model=ConnectFourNet())
+        self.assert_run_successful(trainer, config)
 
-    trainer.train()
+    def test_connect_four_parallel_seq(self) -> None:
+        config_path = os.path.join(os.path.dirname(__file__), "configs", "connect_four_parallel_seq_test.yaml")
+        config = AlphaZooConfig.from_yaml(config_path)
+        trainer = AlphaZoo(env=connect_four_v3.env(), config=config, model=ConnectFourNet())
+        self.assert_run_successful(trainer, config)
 
+    def test_connect_four_parallel_async(self) -> None:
+        config_path = os.path.join(os.path.dirname(__file__), "configs", "connect_four_parallel_async_test.yaml")
+        config = AlphaZooConfig.from_yaml(config_path)
+        trainer = AlphaZoo(env=connect_four_v3.env(), config=config, model=ConnectFourNet())
+        self.assert_run_successful(trainer, config)
 
-def test_connect_four_parallel_seq() -> None:
-    config_path = os.path.join(
-        os.path.dirname(__file__), "configs", "connect_four_parallel_seq_test.yaml"
-    )
-    config = AlphaZooConfig.from_yaml(config_path)
-    model = ConnectFourNet()
+    def test_connect_four_async(self) -> None:
+        config_path = os.path.join(os.path.dirname(__file__), "configs", "connect_four_async_test.yaml")
+        config = AlphaZooConfig.from_yaml(config_path)
+        trainer = AlphaZoo(env=connect_four_v3.env(), config=config, model=ConnectFourNet())
+        self.assert_run_successful(trainer, config)
 
-    trainer = AlphaZoo(
-        env=connect_four_v3.env(),
-        config=config,
-        model=model,
-    )
-
-    trainer.train()
-
-
-def test_connect_four_parallel_async() -> None:
-    config_path = os.path.join(
-        os.path.dirname(__file__), "configs", "connect_four_parallel_async_test.yaml"
-    )
-    config = AlphaZooConfig.from_yaml(config_path)
-    model = ConnectFourNet()
-
-    trainer = AlphaZoo(
-        env=connect_four_v3.env(),
-        config=config,
-        model=model,
-    )
-
-    trainer.train()
-
-
-def test_connect_four_async() -> None:
-    config_path = os.path.join(
-        os.path.dirname(__file__), "configs", "connect_four_async_test.yaml"
-    )
-    config = AlphaZooConfig.from_yaml(config_path)
-    model = ConnectFourNet()
-
-    trainer = AlphaZoo(
-        env=connect_four_v3.env(),
-        config=config,
-        model=model,
-    )
-
-    trainer.train()
-
-
-def test_connect_four_reanalyse_seq() -> None:
-    config_path = os.path.join(
-        os.path.dirname(__file__), "configs", "connect_four_reanalyse_seq_test.yaml"
-    )
-    config = AlphaZooConfig.from_yaml(config_path)
-    model = ConnectFourNet()
-
-    trainer = AlphaZoo(
-        env=connect_four_v3.env(),
-        config=config,
-        model=model,
-    )
-
-    trainer.train()
+    def test_connect_four_reanalyse_seq(self) -> None:
+        config_path = os.path.join(os.path.dirname(__file__), "configs", "connect_four_reanalyse_seq_test.yaml")
+        config = AlphaZooConfig.from_yaml(config_path)
+        trainer = AlphaZoo(env=connect_four_v3.env(), config=config, model=ConnectFourNet())
+        self.assert_run_successful(trainer, config)

@@ -15,6 +15,8 @@ from alphazoo.configs.alphazoo_config import AlphaZooConfig
 from alphazoo.networks import AlphaZooRecurrentNet
 from alphazoo import AlphaZoo
 
+from .utils.end_to_end_test import EndToEndTest
+
 
 class TicTacToeRecurrentNet(AlphaZooRecurrentNet):
     """Small DeepThinking-style recurrent net. Expects CHW input (B, 2, 3, 3)."""
@@ -44,17 +46,12 @@ class TicTacToeRecurrentNet(AlphaZooRecurrentNet):
         return (policy, value), interim_thought
 
 
-def test_tictactoe_recurrent_progressive_loss() -> None:
-    config_path = os.path.join(
-        os.path.dirname(__file__), "configs", "tictactoe_recurrent_seq_test.yaml"
-    )
-    config = AlphaZooConfig.from_yaml(config_path)
-    model = TicTacToeRecurrentNet()
+class TestRecurrentSupport(EndToEndTest):
 
-    trainer = AlphaZoo(
-        env=tictactoe_v3.env(),
-        config=config,
-        model=model,
-    )
-
-    trainer.train()
+    def test_tictactoe_recurrent_progressive_loss(self) -> None:
+        config_path = os.path.join(
+            os.path.dirname(__file__), "configs", "tictactoe_recurrent_seq_test.yaml"
+        )
+        config = AlphaZooConfig.from_yaml(config_path)
+        trainer = AlphaZoo(env=tictactoe_v3.env(), config=config, model=TicTacToeRecurrentNet())
+        self.assert_run_successful(trainer, config)

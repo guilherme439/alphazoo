@@ -13,6 +13,8 @@ from alphazoo.configs.alphazoo_config import AlphaZooConfig
 from alphazoo.networks import AlphaZooNet
 from alphazoo import AlphaZoo
 
+from .utils.end_to_end_test import EndToEndTest
+
 
 class TicTacToeNet(AlphaZooNet):
     """Expects CHW input (1, 2, 3, 3)."""
@@ -31,65 +33,28 @@ class TicTacToeNet(AlphaZooNet):
         return self.policy_head(x), torch.tanh(self.value_head(x))
 
 
-def test_tictactoe_seq() -> None:
-    config_path = os.path.join(
-        os.path.dirname(__file__), "configs", "tictactoe_seq_test.yaml"
-    )
-    config = AlphaZooConfig.from_yaml(config_path)
-    model = TicTacToeNet()
+class TestTicTacToe(EndToEndTest):
 
-    trainer = AlphaZoo(
-        env=tictactoe_v3.env(),
-        config=config,
-        model=model,
-    )
+    def test_tictactoe_seq(self) -> None:
+        config_path = os.path.join(os.path.dirname(__file__), "configs", "tictactoe_seq_test.yaml")
+        config = AlphaZooConfig.from_yaml(config_path)
+        trainer = AlphaZoo(env=tictactoe_v3.env(), config=config, model=TicTacToeNet())
+        self.assert_run_successful(trainer, config)
 
-    trainer.train()
+    def test_tictactoe_parallel_seq(self) -> None:
+        config_path = os.path.join(os.path.dirname(__file__), "configs", "tictactoe_parallel_seq_test.yaml")
+        config = AlphaZooConfig.from_yaml(config_path)
+        trainer = AlphaZoo(env=tictactoe_v3.env(), config=config, model=TicTacToeNet())
+        self.assert_run_successful(trainer, config)
 
+    def test_tictactoe_parallel_async(self) -> None:
+        config_path = os.path.join(os.path.dirname(__file__), "configs", "tictactoe_parallel_async_test.yaml")
+        config = AlphaZooConfig.from_yaml(config_path)
+        trainer = AlphaZoo(env=tictactoe_v3.env(), config=config, model=TicTacToeNet())
+        self.assert_run_successful(trainer, config)
 
-def test_tictactoe_parallel_seq() -> None:
-    config_path = os.path.join(
-        os.path.dirname(__file__), "configs", "tictactoe_parallel_seq_test.yaml"
-    )
-    config = AlphaZooConfig.from_yaml(config_path)
-    model = TicTacToeNet()
-
-    trainer = AlphaZoo(
-        env=tictactoe_v3.env(),
-        config=config,
-        model=model,
-    )
-
-    trainer.train()
-
-
-def test_tictactoe_parallel_async() -> None:
-    config_path = os.path.join(
-        os.path.dirname(__file__), "configs", "tictactoe_parallel_async_test.yaml"
-    )
-    config = AlphaZooConfig.from_yaml(config_path)
-    model = TicTacToeNet()
-
-    trainer = AlphaZoo(
-        env=tictactoe_v3.env(),
-        config=config,
-        model=model,
-    )
-
-    trainer.train()
-
-
-def test_tictactoe_async() -> None:
-    config_path = os.path.join(
-        os.path.dirname(__file__), "configs", "tictactoe_async_test.yaml"
-    )
-    config = AlphaZooConfig.from_yaml(config_path)
-    model = TicTacToeNet()
-
-    trainer = AlphaZoo(
-        env=tictactoe_v3.env(),
-        config=config,
-        model=model,
-    )
-
-    trainer.train()
+    def test_tictactoe_async(self) -> None:
+        config_path = os.path.join(os.path.dirname(__file__), "configs", "tictactoe_async_test.yaml")
+        config = AlphaZooConfig.from_yaml(config_path)
+        trainer = AlphaZoo(env=tictactoe_v3.env(), config=config, model=TicTacToeNet())
+        self.assert_run_successful(trainer, config)

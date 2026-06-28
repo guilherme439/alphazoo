@@ -10,9 +10,9 @@ from alphazoo.ialphazoo_game import IAlphazooGame
 
 class MockGame(IAlphazooGame):
     """
-    Deterministic game with configurable actions, depth, and action mask.
-    Player alternates between 1 and 2. Terminal value is +1.0.
-    Observation is a 1D float32 array of size 4.
+    Deterministic game with configurable actions, depth, and action mask
+    Player alternates between 1 and 2. Terminal value is +1.0
+    Observation is a 1D float32 array of size 4
     """
 
     def __init__(self, num_actions=4, max_depth=6, action_mask=None):
