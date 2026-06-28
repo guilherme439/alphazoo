@@ -18,7 +18,8 @@ from .configs.alphazoo_config import AlphaZooConfig, AsynchronousConfig, CacheCo
 from .configs.replay_buffer_config import ReanalyseConfig
 from .configs.search_config import SearchConfig
 from .ialphazoo_game import IAlphazooGame
-from .inference.ipc import IpcInferenceClient, IpcInferenceServer
+from .inference.iinference_client import IInferenceClient
+from ._internal_utils.inference import InferenceUtils
 from ._internal_utils.optimization import OptimizationUtils
 from ._internal_utils.common import CommonUtils
 from ._internal_utils.checkpoint import CheckpointUtils
@@ -381,15 +382,11 @@ class AlphaZoo:
         cache_config: CacheConfig,
         recurrent_config: RecurrentConfig,
     ) -> None:
-        # server doesn't have gpu/data paralellism yet
-        inference_num_gpus = 1 if self.inference_host.device().startswith("cuda") else 0
-        # In the future the server class used should depend on the available resources
-        self._inference_server = IpcInferenceServer.options(num_gpus=inference_num_gpus).remote(
+        self._inference_server = InferenceUtils.create_server(
+            self.config.running.inference_backend,
             self.inference_host,
             total_clients,
-            self.game.state_shape(),
-            self.game.state_size(),
-            self.game.action_size(),
+            self.game,
             cache_config,
             recurrent_config,
         )
@@ -402,7 +399,7 @@ class AlphaZoo:
 
     def _create_gamers(
         self,
-        gamer_clients: list[list[IpcInferenceClient]],
+        gamer_clients: list[list[IInferenceClient]],
         search_config: SearchConfig,
     ) -> list[ActorHandle]:
         gamers: list[ActorHandle] = []
@@ -419,7 +416,7 @@ class AlphaZoo:
 
     def _create_reanalyse_coordinator(
         self,
-        reanalyser_clients: list[list[IpcInferenceClient]],
+        reanalyser_clients: list[list[IInferenceClient]],
         reanalyse_config: ReanalyseConfig,
     ) -> ActorHandle:
         coordinator = ReanalyseCoordinator.options(

@@ -4,7 +4,7 @@ import torch
 from ray.util import ActorPool
 from torch import Tensor, nn
 
-from ..inference.ipc import IpcInferenceClient
+from ..inference.iinference_client import IInferenceClient
 from .loss_functions import LossFunctions
 
 type LossFunction = Callable[[Tensor, Tensor], Tensor]
@@ -47,19 +47,19 @@ class CommonUtils:
 
     @staticmethod
     def distribute_clients(
-        inference_clients: list[IpcInferenceClient],
+        inference_clients: list[IInferenceClient],
         num_gamers: int,
         threads_per_gamer: int,
         num_reanalysers: int,
         threads_per_reanalyser: int,
-    ) -> tuple[list[list[IpcInferenceClient]], list[list[IpcInferenceClient]]]:
-        gamer_clients: list[list[IpcInferenceClient]] = []
+    ) -> tuple[list[list[IInferenceClient]], list[list[IInferenceClient]]]:
+        gamer_clients: list[list[IInferenceClient]] = []
         for i in range(num_gamers):
             start = i * threads_per_gamer
             gamer_clients.append(inference_clients[start : start + threads_per_gamer])
 
         offset = num_gamers * threads_per_gamer
-        reanalyser_clients: list[list[IpcInferenceClient]] = []
+        reanalyser_clients: list[list[IInferenceClient]] = []
         for i in range(num_reanalysers):
             start = offset + i * threads_per_reanalyser
             reanalyser_clients.append(inference_clients[start : start + threads_per_reanalyser])

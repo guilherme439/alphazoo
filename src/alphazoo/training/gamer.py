@@ -6,7 +6,7 @@ import ray
 
 from ..configs.search_config import SearchConfig
 from ..ialphazoo_game import IAlphazooGame
-from ..inference.ipc import IpcInferenceClient
+from ..inference.iinference_client import IInferenceClient
 from ..metrics import MetricsRecorder
 from ..search.explorer import Explorer
 from ..search.mcts.node import Node
@@ -33,7 +33,7 @@ class Gamer:
         game: IAlphazooGame,
         search_config: SearchConfig,
         player_dependent_value: bool,
-        inference_clients: list[IpcInferenceClient],
+        inference_clients: list[IInferenceClient],
         game_encoder: Optional[GameEncoder] = None,
     ) -> None:
         self.game = game

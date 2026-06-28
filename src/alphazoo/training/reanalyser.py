@@ -7,7 +7,7 @@ import torch
 from ray.actor import ActorHandle
 
 from ..configs.search_config import SearchConfig
-from ..inference.ipc import IpcInferenceClient
+from ..inference.iinference_client import IInferenceClient
 from ..search.explorer import Explorer
 from ..search.mcts.node import Node
 from ..ialphazoo_game import IAlphazooGame
@@ -38,7 +38,7 @@ class Reanalyser:
         self,
         search_config: SearchConfig,
         player_dependent_value: bool,
-        inference_clients: list[IpcInferenceClient],
+        inference_clients: list[IInferenceClient],
         game_encoder: GameEncoder,
     ) -> None:
         self.search_config = search_config

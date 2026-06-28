@@ -5,7 +5,7 @@ import ray
 from ray.actor import ActorHandle
 
 from ..configs.replay_buffer_config import ReanalyseConfig
-from ..inference.ipc import IpcInferenceClient
+from ..inference.iinference_client import IInferenceClient
 from .game_encoder import GameEncoder
 from .reanalyser import Reanalyser, ReanalyseRequest, ReanalyseResult
 
@@ -17,7 +17,7 @@ class ReanalyseCoordinator:
 
     def __init__(
         self,
-        reanalyser_clients: list[list[IpcInferenceClient]],
+        reanalyser_clients: list[list[IInferenceClient]],
         reanalyse_config: ReanalyseConfig,
         player_dependent_value: bool,
         game_encoder: GameEncoder,

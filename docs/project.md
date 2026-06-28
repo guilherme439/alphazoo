@@ -26,11 +26,11 @@ The model must subclass either `AlphaZooNet` or `AlphaZooRecurrentNet` (both fro
 ### Training Orchestrator (`training/alphazoo.py`)
 
 `AlphaZoo` class manages the full training loop:
-1. **Self-play phase** (`_run_selfplay`): Ray `Gamer` actors play games using MCTS, each connected to a centralized `IpcInferenceServer` via shared memory + named FIFOs. Trajectories are stored in a `ReplayBuffer`. Sequential mode dispatches `num_games_per_step` games to the gamer pool (`ray.util.ActorPool`) and waits for completion.
+1. **Self-play phase** (`_run_selfplay`): Ray `Gamer` actors play games using MCTS, each connected to a centralized inference server (see Inference). Trajectories are stored in a `ReplayBuffer`. Sequential mode dispatches `num_games_per_step` games to the gamer pool (`ray.util.ActorPool`) and waits for completion.
 2. **Network training phase** (`_train_network`): samples batches from replay buffer, computes policy + value loss, backprops
 3. **Model distribution**: updated weights pushed to the inference server via `publish_model(state_dict)`. The state dict is sourced from `NetworkTrainer.get_state_dict()` so the orchestrator doesn't reach into the training-side `ModelHost` directly.
 
-The orchestrator creates two `ModelHost` instances at init: one with `training=True` (handed to `NetworkTrainer`) and one with `training=False` (handed to the `IpcInferenceServer`). See the Model Host section below.
+The orchestrator creates two `ModelHost` instances at init: one with `training=True` (handed to `NetworkTrainer`) and one with `training=False` (handed to the inference server). See the Model Host section below.
 
 **Checkpointing**: `AlphaZoo.save(path, save_model=True)` writes a checkpoint directory containing `optimizer.pt`, `scheduler.pt`, `replay_buffer.pt`, an optional `model.pt` (the full pickled model), and a `metadata.json` (`{format_version, iteration}`) written last. Each component is serialized directly to disk under its owner's `threading.Lock` (the `synchronized` decorator on `ReplayBuffer.write_to` / `NetworkTrainer.write_to`, both guarded against the per-step buffer mutations and the `optimizer.step()`/`scheduler.step()`), so `save` is thread-safe with no in-memory copy and can run from a background writer thread while training proceeds. `AlphaZoo.load(path, *, load_model, load_optimizer, load_scheduler, load_replay_buffer, load_iteration, model_strict)` restores the selected components into a constructed instance; `metadata.json` is required and its `format_version` validated. `AlphaZoo.from_checkpoint(path, env, config, model=None, **flags)` constructs then loads, reconstructing the network from `model.pt` when `model` is omitted (requires `save_model=True` at save time). The `get_*_state_dict` accessors remain as raw, non-thread-safe probes.
 
@@ -93,7 +93,7 @@ Popped entries are held out of the buffer while in flight — they cannot be sam
 
 Ray actors for parallelism:
 - `Gamer` (`training/gamer.py`): each Gamer is a Ray actor that plays games using MCTS. Holds one or more `IInferenceClient` handles for neural network evaluations. `play_games(n) -> list[GameRecord]` returns records directly (used in sequential mode via `ActorPool`); `play_forever()` pushes records to an internal queue drained via `get_completed_games()` (used in async mode); `stop()` halts the async loop. Takes an optional `GameEncoder` which it passes to each `GameRecord` to perform snapshot capture.
-- `Reanalyser` (`training/reanalyser.py`): each Reanalyser is a stateless Ray actor (`max_concurrency=1`) exposing `process(request) -> ReanalyseResult`. The trainer dispatches via `ActorPool`; no per-actor queues. Holds its own `IInferenceClient` slots — provisioned alongside the gamer slots when `IpcInferenceServer` is initialized.
+- `Reanalyser` (`training/reanalyser.py`): each Reanalyser is a stateless Ray actor (`max_concurrency=1`) exposing `process(request) -> ReanalyseResult`. The trainer dispatches via `ActorPool`; no per-actor queues. Holds its own `IInferenceClient` instances - provisioned alongside the gamer clients when the inference server is created.
 - `ReplayBuffer`: shared training data store.
 
 ### Inference (`inference/`)
@@ -101,12 +101,14 @@ Ray actors for parallelism:
 Inference is organised behind two interfaces (`IInferenceClient`, `IInferenceServer`) with three deployment-mode implementations, picked based on where the consumer runs relative to the model:
 
 - **`lpc/`** — Local Procedure Call. `LpcInferenceServer` holds an `nn.Module` and serves requests synchronously to in-process `LpcInferenceClient` instances. No Ray, no shared memory. Used for one-shot external entry points like `select_action_with_mcts_for`.
-- **`ipc/`** — Inter-Process Communication. `IpcInferenceServer` is a Ray actor on the same machine as its clients. It holds a `ModelHost` and serves inference to `IpcInferenceClient`s in other processes. Transport is owned by `InferenceSlot`: named shared memory for zero-copy tensor passing and named FIFO pipes for ready/done signalling. Inference runs as a three-stage pipeline so I/O overlaps GPU compute: a collector thread waits on every slot's ready fd via `epoll` and answers cache hits directly, a GPU thread drains the misses into one stacked forward pass, and a writer thread returns results to their slots; the stages are connected by queues and stopped via a sentinel hand-off. Used by `AlphaZoo` for training-time self-play.
-- **`rpc/`** — Remote Procedure Call. Reserved for multi-machine deployments; not yet implemented.
+- **`ipc/`** — Inter-Process Communication. `IpcInferenceServer` is a Ray actor on the same machine as its clients. It holds a `ModelHost` and serves inference to `IpcInferenceClient`s in other processes. Transport is owned by `InferenceSlot`: named shared memory for zero-copy tensor passing and named FIFO pipes for ready/done signalling. Inference runs as a three-stage pipeline so I/O overlaps GPU compute: a collector thread waits on every slot's ready fd via `epoll` and answers cache hits directly, a GPU thread drains the misses into one stacked forward pass, and a writer thread returns results to their slots; the stages are connected by queues and stopped via a sentinel hand-off. Used by `AlphaZoo` for training-time self-play on a single machine.
+- **`rpc/`** - Remote Procedure Call. `RpcInferenceServer` is a Ray actor reachable from clients on any node. It holds a `ModelHost` and serves inference to `RpcInferenceClient`s through Ray method calls. A cache hit is answered inline on the calling thread; misses are enqueued and a single batcher thread drains them into one stacked forward pass, returning each result through a per-request event. Each client call occupies one actor-concurrency thread, so the actor is created with `max_concurrency = total_clients + reserve`. Used by `AlphaZoo` for training-time self-play across multiple nodes.
+
+`AlphaZoo` selects the training-time backend through `InferenceUtils.create_server` (`_internal_utils/inference.py`), which maps the `running.inference_backend` setting (`auto` / `ipc` / `rpc`) to a transport. `auto` selects `rpc` when Ray reports more than one live node and `ipc` otherwise, starting a local single-node Ray if none is running.
 
 Both interfaces are tiny: clients expose a single `inference(state)` returning `(policy_logits, value)`; servers expose `get_clients()` and `publish_model(state_dict)`. Whether the underlying model is recurrent and how many recurrent iterations to run are server-side settings; callers don't need to know. Consumers (e.g. `Gamer`, `Explorer`) depend only on `IInferenceClient`.
 
-Weight updates on the `IpcInferenceServer` are protected by a read-write lock: the GPU thread takes the read lock around forward + cache put for each batch; `publish_model()` takes the write lock to swap weights and invalidate the cache atomically.
+Weight updates on the `IpcInferenceServer` and `RpcInferenceServer` are protected by a read-write lock: the inference thread takes the read lock around forward + cache put for each batch; `publish_model()` takes the write lock to swap weights and invalidate the cache atomically.
 
 ### Caching (`inference/caches/`)
 
@@ -168,7 +170,7 @@ Exposes:
 - `is_recurrent()` — branch on network type at call sites.
 - `get_state_dict(device="cpu")` / `load_state_dict(state_dict)` — for weight publication between the training-side host and the inference-side host.
 
-`AlphaZoo` constructs two hosts up front: one with `training=True` handed to `NetworkTrainer`, one with `training=False` handed to the `IpcInferenceServer`.
+`AlphaZoo` constructs two hosts up front: one with `training=True` handed to `NetworkTrainer`, one with `training=False` handed to the inference server.
 
 ### Metrics (`metrics/`)
 

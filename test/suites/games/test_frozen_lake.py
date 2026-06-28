@@ -59,3 +59,15 @@ class TestFrozenLake(EndToEndTest):
         )
 
         self.assert_run_successful(trainer, config)
+
+    def test_frozen_lake_rpc(self) -> None:
+        config_path = os.path.join(os.path.dirname(__file__), "..", "..", "configs", "frozen_lake_rpc_test.yaml")
+        config = AlphaZooConfig.from_yaml(config_path)
+
+        trainer = AlphaZoo(
+            env=gym.make("FrozenLake-v1", is_slippery=False),
+            config=config,
+            model=FrozenLakeNet(),
+        )
+
+        self.assert_run_successful(trainer, config)
