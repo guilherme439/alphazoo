@@ -3,27 +3,38 @@ verbose: true
 running:
   running_mode: "sequential"
   num_gamers: 2
-  training_steps: 4
+  training_steps: 3
   sequential:
-    num_games_per_step: 4
+    num_games_per_step: 2
 
 cache:
-  enabled: false
+  enabled: true
+  max_size: 500
 
 data:
-  player_dependent_value: true
+  player_dependent_value: false
 
 learning:
   replay_buffer:
-    window_size: 1000
+    window_size: 500
     leak_chance: 0.0
-  learning_method: "epochs"
+    reanalyse:
+      enabled: true
+      num_workers: 1
+      positions_per_step: 6
+      min_buffer_fill_ratio: 0.0
+      compress_games: false
+      search:
+        simulation:
+          mcts_simulations: 6
+  learning_method: "samples"
   value_loss: "SE"
-  policy_loss: "KLD"
-  normalize_ce: false
-  epochs:
-    batch_size: 32
-    learning_epochs: 1
+  policy_loss: "CE"
+  normalize_ce: true
+  samples:
+    batch_size: 16
+    num_samples: 8
+    late_heavy: false
 
 optimizer:
   type: "Adam"
@@ -36,8 +47,12 @@ scheduler:
 
 search:
   simulation:
-    mcts_simulations: 10
+    mcts_simulations: 4
     keep_subtree: false
+    parallel_search: true
+    parallel:
+      num_search_threads: 2
+      virtual_loss: 3.0
   uct:
     pb_c_base: 10000
     pb_c_init: 1.15

@@ -10,8 +10,8 @@ import numpy as np
 import torch
 
 from alphazoo.configs.replay_buffer_config import ReplayBufferConfig
-from alphazoo._internal_utils.checkpoint import atomic_save
-from alphazoo._internal_utils.concurrency import synchronized
+from alphazoo._internal_utils.checkpoint import CheckpointUtils
+from alphazoo._internal_utils.concurrency import ConcurrencyUtils
 
 from .game_record import GameRecord
 
@@ -54,7 +54,7 @@ class ReplayBuffer:
         digest = hashlib.blake2b(state.numpy().tobytes(), digest_size=8).digest()
         return int.from_bytes(digest, 'little')
 
-    @synchronized
+    @ConcurrencyUtils.synchronized
     def save_game_record(self, record: GameRecord, iteration: int) -> None:
         for i in range(len(record)):
             state = record.get_state(i)
@@ -62,7 +62,7 @@ class ReplayBuffer:
             game = record.get_game(i)
             self._save_position(state, value, policy, iteration, game)
 
-    @synchronized
+    @ConcurrencyUtils.synchronized
     def shuffle(self) -> None:
         random.shuffle(self._shuffled_keys)
         self._key_to_shuffled_idx = {k: i for i, k in enumerate(self._shuffled_keys)}
@@ -88,7 +88,7 @@ class ReplayBuffer:
             for i in batch_indexes
         ]
 
-    @synchronized
+    @ConcurrencyUtils.synchronized
     def pop_oldest(self, n: int) -> list[tuple[int, BufferEntry]]:
         popped_entries: list[tuple[int, BufferEntry]] = []
 
@@ -97,7 +97,7 @@ class ReplayBuffer:
             popped_entries.append(self._pop_head())
         return popped_entries
 
-    @synchronized
+    @ConcurrencyUtils.synchronized
     def apply_reanalyse_result(self, reanalyse_result: ReanalyseResult, current_step: int) -> None:
         key: int = reanalyse_result.original_key
         original_entry: BufferEntry = reanalyse_result.original_entry
@@ -124,12 +124,12 @@ class ReplayBuffer:
             'duplicates_absorbed': self._duplicates_absorbed,
         }
 
-    @synchronized
+    @ConcurrencyUtils.synchronized
     def write_to(self, path: str) -> None:
         """Serialize the buffer to ``path`` while holding the buffer lock (no copy)."""
-        atomic_save(self.state_dict(), path)
+        CheckpointUtils.atomic_save(self.state_dict(), path)
 
-    @synchronized
+    @ConcurrencyUtils.synchronized
     def load(self, state: dict) -> None:
         self._buffer = state['buffer']
         self._total_positions_seen = state['total_positions_seen']

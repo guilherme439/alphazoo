@@ -8,9 +8,9 @@ import torch
 from torch import Tensor, nn
 
 from alphazoo.configs.alphazoo_config import LearningConfig, RecurrentConfig
-from alphazoo._internal_utils.checkpoint import atomic_save
-from alphazoo._internal_utils.common import get_policy_loss_fn, get_value_loss_fn
-from alphazoo._internal_utils.concurrency import synchronized
+from alphazoo._internal_utils.checkpoint import CheckpointUtils
+from alphazoo._internal_utils.common import CommonUtils
+from alphazoo._internal_utils.concurrency import ConcurrencyUtils
 
 from ..metrics import MetricsRecorder
 from ..networks.model_host import ModelHost
@@ -39,8 +39,8 @@ class NetworkTrainer:
         self.config = config
         self.recurrent_config = recurrent_config
 
-        self.policy_loss_function, self.normalize_policy = get_policy_loss_fn(config.policy_loss, config.normalize_ce)
-        self.value_loss_function = get_value_loss_fn(config.value_loss)
+        self.policy_loss_function, self.normalize_policy = CommonUtils.get_policy_loss_fn(config.policy_loss, config.normalize_ce)
+        self.value_loss_function = CommonUtils.get_value_loss_fn(config.value_loss)
 
         self.recorder = MetricsRecorder()
 
@@ -52,7 +52,7 @@ class NetworkTrainer:
     def get_model_state_dict(self) -> dict:
         return self.model_host.get_state_dict()
 
-    @synchronized
+    @ConcurrencyUtils.synchronized
     def write_to(
         self,
         optimizer_path: str,
@@ -64,10 +64,10 @@ class NetworkTrainer:
         model to disk while holding the trainer lock, so the three are mutually consistent
         without an in-memory copy.
         """
-        atomic_save(self.optimizer.state_dict(), optimizer_path)
-        atomic_save(self.scheduler.state_dict(), scheduler_path)
+        CheckpointUtils.atomic_save(self.optimizer.state_dict(), optimizer_path)
+        CheckpointUtils.atomic_save(self.scheduler.state_dict(), scheduler_path)
         if model_path is not None:
-            atomic_save(self.model_host.model, model_path)
+            CheckpointUtils.atomic_save(self.model_host.model, model_path)
 
     def run_training_step(self) -> None:
         replay_size: int = len(self.replay_buffer)
@@ -225,7 +225,7 @@ class NetworkTrainer:
 
         return value_loss.item(), policy_loss.item(), combined_loss.item()  # type: ignore[union-attr]
 
-    @synchronized
+    @ConcurrencyUtils.synchronized
     def _step_optimizer_and_scheduler(self) -> None:
         self.optimizer.step()
         self.scheduler.step()

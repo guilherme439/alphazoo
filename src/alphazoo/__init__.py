@@ -27,7 +27,7 @@ from .configs.alphazoo_config import AlphaZooConfig
 from .configs.search_config import SearchConfig
 from .metrics import MetricsRecorder, MetricsStore
 from .ialphazoo_game import IAlphazooGame
-from .wrappers.pettingzoo_wrapper import PettingZooWrapper
+from .envs.pettingzoo_wrapper import PettingZooWrapper
 
 __all__ = [
     "__version__",

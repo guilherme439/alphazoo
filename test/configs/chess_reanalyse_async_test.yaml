@@ -1,11 +1,12 @@
 verbose: true
 
 running:
-  running_mode: "sequential"
-  num_gamers: 1
+  running_mode: "asynchronous"
+  num_gamers: 3
   training_steps: 6
-  sequential:
-    num_games_per_step: 2
+  asynchronous:
+    update_delay: 20
+    min_num_games: 2
 
 cache:
   enabled: false
@@ -15,14 +16,23 @@ data:
 
 learning:
   replay_buffer:
-    window_size: 500
+    window_size: 1000
     leak_chance: 0.0
+    reanalyse:
+      enabled: true
+      num_workers: 1
+      positions_per_step: 4
+      min_buffer_fill_ratio: 0.0
+      compress_games: true
+      search:
+        simulation:
+          mcts_simulations: 4
   learning_method: "epochs"
   value_loss: "SE"
   policy_loss: "KLD"
   normalize_ce: false
   epochs:
-    batch_size: 32
+    batch_size: 16
     learning_epochs: 1
 
 optimizer:
@@ -37,7 +47,7 @@ scheduler:
 
 search:
   simulation:
-    mcts_simulations: 12
+    mcts_simulations: 10
     keep_subtree: false
   uct:
     pb_c_base: 10000

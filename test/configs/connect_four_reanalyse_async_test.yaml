@@ -1,11 +1,12 @@
 verbose: true
 
 running:
-  running_mode: "sequential"
-  num_gamers: 1
-  training_steps: 6
-  sequential:
-    num_games_per_step: 2
+  running_mode: "asynchronous"
+  num_gamers: 2
+  training_steps: 4
+  asynchronous:
+    update_delay: 15
+    min_num_games: 2
 
 cache:
   enabled: false
@@ -17,6 +18,15 @@ learning:
   replay_buffer:
     window_size: 500
     leak_chance: 0.0
+    reanalyse:
+      enabled: true
+      num_workers: 2
+      positions_per_step: 8
+      min_buffer_fill_ratio: 0.0
+      compress_games: true
+      search:
+        simulation:
+          mcts_simulations: 16
   learning_method: "epochs"
   value_loss: "SE"
   policy_loss: "KLD"
@@ -29,15 +39,14 @@ optimizer:
   type: "Adam"
 
 scheduler:
-  type: sin
-  min_lr: 5.0e-5
-  max_lr: 1.5e-4
-  start_period: 500
-  steps_covered: 2000
+  type: step
+  start_lr: 1.0e-3
+  boundaries: [100]
+  gamma: 0.1
 
 search:
   simulation:
-    mcts_simulations: 12
+    mcts_simulations: 8
     keep_subtree: false
   uct:
     pb_c_base: 10000

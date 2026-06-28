@@ -2,11 +2,11 @@ verbose: true
 
 running:
   running_mode: "asynchronous"
-  num_gamers: 2
-  training_steps: 2
+  num_gamers: 3
+  training_steps: 3
   asynchronous:
     update_delay: 15
-    min_num_games: 2
+    min_num_games: 3
 
 cache:
   enabled: true

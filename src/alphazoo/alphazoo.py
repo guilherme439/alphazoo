@@ -6,27 +6,28 @@ from copy import deepcopy
 from datetime import datetime
 from typing import Any, Optional
 import click
+import gymnasium as gym
 import ray
 from pettingzoo.utils.env import AECEnv
 from ray.actor import ActorHandle
 from ray.util import ActorPool
 
-from ._internal_utils.exception_handler import ExceptionHandler
+from .core.exception_handler import ExceptionHandler
 
 from .configs.alphazoo_config import AlphaZooConfig, AsynchronousConfig, CacheConfig, LearningConfig, RecurrentConfig, RunningConfig, SequentialConfig
 from .configs.replay_buffer_config import ReanalyseConfig
 from .configs.search_config import SearchConfig
 from .ialphazoo_game import IAlphazooGame
 from .inference.ipc import IpcInferenceClient, IpcInferenceServer
-from ._internal_utils.optimizer import create_optimizer, create_scheduler, render_lr_schedule_preview, sync_optimizer_lr
-from ._internal_utils.common import distribute_clients
-from ._internal_utils import checkpoint
+from ._internal_utils.optimization import OptimizationUtils
+from ._internal_utils.common import CommonUtils
+from ._internal_utils.checkpoint import CheckpointUtils
+from ._internal_utils.env import EnvUtils
 from ._internal_utils.progress import Spinner
 from .metrics import MetricsRecorder, MetricsStore
 from .networks.interfaces import AlphaZooNet, AlphaZooRecurrentNet
 from .networks.model_host import ModelHost
 from .profiling import Profiler
-from .wrappers.pettingzoo_wrapper import PettingZooWrapper
 from .training.game_encoder import GameEncoder
 from .training.game_record import GameRecord
 from .training.gamer import Gamer
@@ -43,21 +44,16 @@ class AlphaZoo:
 
     def __init__(
         self,
-        env: AECEnv | IAlphazooGame,
+        env: AECEnv | gym.Env | IAlphazooGame,
         config: AlphaZooConfig,
         model: AlphaZooNet | AlphaZooRecurrentNet,
     ) -> None:
         self.config = config
-        self.game = env if isinstance(env, IAlphazooGame) else PettingZooWrapper(
-            env,
-            observation_format=config.data.observation_format,
-            network_input_format=config.data.network_input_format,
-        )
+        self.game = EnvUtils.wrap(env, config)
         self.current_step: int = - 1 # the -1 means no step completed yet
         self.starting_step: int = 0
 
         self.replay_buffer = ReplayBuffer(self.config.learning.replay_buffer)
-
 
         # -------------------- NETWORK SETUP ------------------- #
 
@@ -66,12 +62,12 @@ class AlphaZoo:
         self.training_host = ModelHost(self.model, training=True)
         self.inference_host = ModelHost(deepcopy(self.model), training=False)
 
-        self.optimizer = create_optimizer(
+        self.optimizer = OptimizationUtils.create_optimizer(
             self.training_host.model,
             config.scheduler.start_lr,
             config.optimizer
         )
-        self.scheduler = create_scheduler(
+        self.scheduler = OptimizationUtils.create_scheduler(
             self.optimizer,
             config.scheduler
         )
@@ -84,7 +80,6 @@ class AlphaZoo:
             self.config.learning,
             self.config.recurrent if is_recurrent_model else None,
         )
-
 
         # ----------------------- METRICS ---------------------- #
 
@@ -108,7 +103,7 @@ class AlphaZoo:
     def from_checkpoint(
         cls,
         path: str,
-        env: AECEnv | IAlphazooGame,
+        env: AECEnv | gym.Env | IAlphazooGame,
         config: AlphaZooConfig,
         model: Optional[AlphaZooNet | AlphaZooRecurrentNet] = None,
         *,
@@ -122,13 +117,13 @@ class AlphaZoo:
         Construct an instance and restore a checkpoint written by `save`.
         """
         if model is None:
-            model_path = os.path.join(path, checkpoint.MODEL_FILE)
+            model_path = os.path.join(path, CheckpointUtils.MODEL_FILE)
             if not os.path.exists(model_path):
                 raise FileNotFoundError(
                     f"No model provided and checkpoint '{path}' has no saved model "
-                    f"('{checkpoint.MODEL_FILE}'); pass a model or save with save_model=True."
+                    f"('{CheckpointUtils.MODEL_FILE}'); pass a model or save with save_model=True."
                 )
-            model = checkpoint.load_component(path, checkpoint.MODEL_FILE, "cpu")
+            model = CheckpointUtils.load_component(path, CheckpointUtils.MODEL_FILE, "cpu")
             load_model = False  # the reconstructed model already carries the weights
 
         instance = cls(env, config, model)
@@ -163,70 +158,6 @@ class AlphaZoo:
     def get_model_state_dict(self) -> dict:
         """Live model weights. Not thread-safe; use `save` for a consistent checkpoint during training."""
         return self.trainer.get_model_state_dict()
-
-
-    # ------------------- CHECKPOINTING ------------------- #
-
-    def save(self, path: str, save_model: bool = True) -> None:
-        """
-        Write a checkpoint directory at `path`: optimizer, scheduler, replay buffer, and
-        (when `save_model`) the full model, plus a `metadata.json` written last.
-
-        Thread-safe: each component is serialized directly to disk under its owning lock,
-        so this may be called from a background thread while training runs.
-        """
-        os.makedirs(path, exist_ok=True)
-
-        self.replay_buffer.write_to(os.path.join(path, checkpoint.REPLAY_BUFFER_FILE))
-
-        model_path = os.path.join(path, checkpoint.MODEL_FILE) if save_model else None
-        self.trainer.write_to(
-            os.path.join(path, checkpoint.OPTIMIZER_FILE),
-            os.path.join(path, checkpoint.SCHEDULER_FILE),
-            model_path,
-        )
-
-        checkpoint.write_metadata(path, self.current_step)
-
-    def load(
-        self,
-        path: str,
-        *,
-        load_model: bool = True,
-        load_optimizer: bool = True,
-        load_scheduler: bool = True,
-        load_replay_buffer: bool = True,
-        model_strict: bool = True,
-    ) -> None:
-        """
-        Restore the requested components from the checkpoint directory at `path`.
-
-        The iteration is always restored from `metadata.json` (so `train` continues from the
-        next step). Intended for setup / resume; not for use concurrently with a running
-        `train`. Raises if `metadata.json` or a requested component file is missing.
-        """
-        metadata = checkpoint.read_metadata(path)
-
-        if load_model:
-            model = checkpoint.load_component(path, checkpoint.MODEL_FILE, self.training_host.device())
-            state_dict = model.state_dict()
-            self.training_host.load_state_dict(state_dict, strict=model_strict)
-            self.inference_host.load_state_dict(state_dict, strict=model_strict)
-        if load_optimizer:
-            self.optimizer.load_state_dict(
-                checkpoint.load_component(path, checkpoint.OPTIMIZER_FILE, self.training_host.device())
-            )
-        if load_scheduler:
-            self.scheduler.load_state_dict(
-                checkpoint.load_component(path, checkpoint.SCHEDULER_FILE, "cpu")
-            )
-        if load_optimizer or load_scheduler:
-            sync_optimizer_lr(self.optimizer, self.scheduler)
-        if load_replay_buffer:
-            self.replay_buffer.load(checkpoint.load_component(path, checkpoint.REPLAY_BUFFER_FILE, "cpu"))
-
-        self.current_step = metadata["iteration"]
-        self.starting_step = metadata["iteration"] + 1
 
     # ----------------------------------------------------- #
 
@@ -318,47 +249,73 @@ class AlphaZoo:
             total_run_time = time.time() - run_start
             self.recorder.lifetime_scalar("time/total", total_run_time)
             logger.info("Total run time: " + format(total_run_time / 60, '.4') + "m")
-        
-        
-    def _lr_schedule_preview(self) -> None:
-        if not self.config.scheduler.preview:
-            return
-        if self.config.learning.learning_method != "samples":
-            logger.info("LR schedule preview is only available for the 'samples' learning method; skipping.")
-            return
 
-        preview_path = render_lr_schedule_preview(self.config, self.scheduler, self.starting_step)
-        if preview_path is None or not sys.stdin.isatty():
-            return
+    # ------------------- CHECKPOINTING ------------------- #
 
-        logger.info("[Previewing LR] Press any key to continue. Press Esc to cancel the run.")
-        if click.getchar() == "\x1b":  # Esc
-            logger.info("Run cancelled.")
-            sys.exit(0)
+    def save(self, path: str, save_model: bool = True) -> None:
+        """
+        Write a checkpoint directory at `path`: optimizer, scheduler, replay buffer, and
+        (when `save_model`) the full model, plus a `metadata.json` written last.
 
-    def _shutdown(self) -> None:
-        if self.config.running.running_mode == "asynchronous":
-            logger.info("Waiting for self-play actors to terminate...\n")
-            for gamer in self._gamers:
-                gamer.stop.remote()
-            ray.get(self._async_gamer_futures)
-            self._collect_completed_games()
+        Thread-safe: each component is serialized directly to disk under its owning lock,
+        so this may be called from a background thread while training runs.
+        """
+        os.makedirs(path, exist_ok=True)
 
-        if self._reanalyse_enabled:
-            logger.info("Waiting for reanalyse actors to terminate...\n")
-            ray.get(self._reanalyse_coordinator.stop.remote())
-            results = ray.get(self._reanalyse_coordinator.collect_results.remote())
-            for result in results:
-                self.replay_buffer.apply_reanalyse_result(result, self.current_step)
+        self.replay_buffer.write_to(os.path.join(path, CheckpointUtils.REPLAY_BUFFER_FILE))
 
-        self._inference_server.stop.remote()
-        ray.get(self._server_future)
+        model_path = os.path.join(path, CheckpointUtils.MODEL_FILE) if save_model else None
+        self.trainer.write_to(
+            os.path.join(path, CheckpointUtils.OPTIMIZER_FILE),
+            os.path.join(path, CheckpointUtils.SCHEDULER_FILE),
+            model_path,
+        )
 
-        self._collect_final_metrics()
-        if self._profiler:
-            self._finalize_profiling()
+        CheckpointUtils.write_metadata(path, self.current_step)
 
-        logger.info("All done.\nExiting")
+    def load(
+        self,
+        path: str,
+        *,
+        load_model: bool = True,
+        load_optimizer: bool = True,
+        load_scheduler: bool = True,
+        load_replay_buffer: bool = True,
+        model_strict: bool = True,
+    ) -> None:
+        """
+        Restore the requested components from the checkpoint directory at `path`.
+
+        The iteration is always restored from `metadata.json` (so `train` continues from the
+        next step). Intended for setup / resume; not for use concurrently with a running
+        `train`. Raises if `metadata.json` or a requested component file is missing.
+        """
+        metadata = CheckpointUtils.read_metadata(path)
+
+        if load_model:
+            model = CheckpointUtils.load_component(path, CheckpointUtils.MODEL_FILE, self.training_host.device())
+            state_dict = model.state_dict()
+            self.training_host.load_state_dict(state_dict, strict=model_strict)
+            self.inference_host.load_state_dict(state_dict, strict=model_strict)
+        if load_optimizer:
+            self.optimizer.load_state_dict(
+                CheckpointUtils.load_component(path, CheckpointUtils.OPTIMIZER_FILE, self.training_host.device())
+            )
+        if load_scheduler:
+            self.scheduler.load_state_dict(
+                CheckpointUtils.load_component(path, CheckpointUtils.SCHEDULER_FILE, "cpu")
+            )
+        if load_optimizer or load_scheduler:
+            OptimizationUtils.sync_optimizer_lr(self.optimizer, self.scheduler)
+        if load_replay_buffer:
+            self.replay_buffer.load(CheckpointUtils.load_component(path, CheckpointUtils.REPLAY_BUFFER_FILE, "cpu"))
+
+        self.current_step = metadata["iteration"]
+        self.starting_step = metadata["iteration"] + 1  
+    
+    # ------------------------------------------------------------------------- #
+    # ----------------------------- PRIVATE METHODS --------------------------- #
+    # ------------------------------------------------------------------------- #
 
     def _initialize_model(self, model:  AlphaZooNet | AlphaZooRecurrentNet) -> bool:
         is_recurrent: bool = isinstance(model, AlphaZooRecurrentNet)
@@ -367,7 +324,6 @@ class AlphaZoo:
                 "A RecurrentConfig must be provided when using an AlphaZooRecurrentNet. "
                 "Add recurrent=RecurrentConfig(...) to your AlphaZooConfig."
             )
-
         self.model = model
 
         # dummy forward pass to initialize possible lazy layers before passing the model to the hosts
@@ -402,7 +358,7 @@ class AlphaZoo:
             self._profiler.attach("inference_server", [self._inference_server])
 
         inference_clients = ray.get(self._inference_server.get_clients.remote())
-        gamer_clients, reanalyser_clients = distribute_clients(
+        gamer_clients, reanalyser_clients = CommonUtils.distribute_clients(
             inference_clients,
             num_gamers,
             threads_per_gamer,
@@ -662,3 +618,43 @@ class AlphaZoo:
         logger.info(
             f"\nTimes - Selfplay: {selfplay_time:.3f}s | Training: {training_time:.3f}s | Step: {step_time:.3f}s\n"
         )
+    
+    def _lr_schedule_preview(self) -> None:
+        if not self.config.scheduler.preview:
+            return
+        if self.config.learning.learning_method != "samples":
+            logger.info("LR schedule preview is only available for the 'samples' learning method; skipping.")
+            return
+
+        preview_path = OptimizationUtils.render_lr_schedule_preview(self.config, self.scheduler, self.starting_step)
+        if preview_path is None or not sys.stdin.isatty():
+            return
+
+        logger.info("[Previewing LR] Press any key to continue. Press Esc to cancel the run.")
+        if click.getchar() == "\x1b":  # Esc
+            logger.info("Run cancelled.")
+            sys.exit(0)
+
+    def _shutdown(self) -> None:
+        if self.config.running.running_mode == "asynchronous":
+            logger.info("Waiting for self-play actors to terminate...\n")
+            for gamer in self._gamers:
+                gamer.stop.remote()
+            ray.get(self._async_gamer_futures)
+            self._collect_completed_games()
+
+        if self._reanalyse_enabled:
+            logger.info("Waiting for reanalyse actors to terminate...\n")
+            ray.get(self._reanalyse_coordinator.stop.remote())
+            results = ray.get(self._reanalyse_coordinator.collect_results.remote())
+            for result in results:
+                self.replay_buffer.apply_reanalyse_result(result, self.current_step)
+
+        self._inference_server.stop.remote()
+        ray.get(self._server_future)
+
+        self._collect_final_metrics()
+        if self._profiler:
+            self._finalize_profiling()
+
+        logger.info("All done.\nExiting")

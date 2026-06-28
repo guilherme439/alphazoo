@@ -5,7 +5,7 @@ from ..configs.search_config import SearchConfig
 from ..inference.lpc import LpcInferenceServer
 from ..search.explorer import Explorer
 from ..search.mcts.node import Node
-from ..wrappers.pettingzoo_wrapper import PettingZooWrapper
+from ..envs.pettingzoo_wrapper import PettingZooWrapper
 
 
 def select_action_with_alphazero_mcts(
