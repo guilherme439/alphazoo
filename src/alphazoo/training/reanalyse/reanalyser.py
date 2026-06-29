@@ -6,14 +6,14 @@ import ray
 import torch
 from ray.actor import ActorHandle
 
-from ..configs.search_config import SearchConfig
-from ..inference.iinference_client import IInferenceClient
-from ..search.explorer import Explorer
-from ..search.mcts.node import Node
-from ..ialphazoo_game import IAlphazooGame
-from .game_encoder import GameEncoder
-from .replay_buffer import BufferEntry
-from .targets import policy_from_root_visits
+from ...configs.search_config import SearchConfig
+from ...inference.iinference_client import IInferenceClient
+from ...search.explorer import Explorer
+from ...search.mcts.node import Node
+from ...ialphazoo_game import IAlphazooGame
+from ..._internal_utils.training import TrainingUtils
+from ..game_encoder import GameEncoder
+from ..replay_buffer import BufferEntry
 
 
 @dataclass
@@ -94,7 +94,7 @@ class Reanalyser:
             use_exploration_noise=True,
             use_action_exploration=True,
         )
-        policy = policy_from_root_visits(root_node, game.action_size())
+        policy = TrainingUtils.policy_from_root_visits(root_node, game.action_size())
         value = root_node.value()
         return ReanalyseResult(
             original_key=request.key,

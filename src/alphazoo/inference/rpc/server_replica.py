@@ -89,6 +89,10 @@ class RpcInferenceReplica(IInferenceReplica):
         self._drain_pending()
 
     @override
+    def alive(self) -> None:
+        pass
+
+    @override
     def stop(self) -> None:
         self._request_queue.put(RpcInferenceReplica._STOP_REQUESTED)
 

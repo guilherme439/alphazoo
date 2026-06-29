@@ -16,7 +16,7 @@ from alphazoo._internal_utils.concurrency import ConcurrencyUtils
 from .game_record import GameRecord
 
 if TYPE_CHECKING:
-    from .reanalyser import ReanalyseResult
+    from .reanalyse.reanalyser import ReanalyseResult
 
 logger = logging.getLogger("alphazoo")
 

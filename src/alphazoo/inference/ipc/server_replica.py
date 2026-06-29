@@ -144,6 +144,10 @@ class IpcInferenceReplica(IInferenceReplica):
         self._cleanup()
 
     @override
+    def alive(self) -> None:
+        pass
+
+    @override
     def stop(self) -> None:
         os.write(self._stop_write, b'\x01')
 

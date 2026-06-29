@@ -33,6 +33,10 @@ class InferenceServer(ABC):
         for replica in self._replicas:
             replica.start()
 
+    def alive(self) -> None:
+        for replica in self._replicas:
+            replica.alive()
+
     def stop(self) -> None:
         for replica in self._replicas:
             replica.stop()
@@ -51,7 +55,7 @@ class InferenceServer(ABC):
         if gpus_per_replica == 0:
             replicas = requested if requested is not None else 1
         else:
-            available = InferenceUtils.count_compute_gpus()
+            available = len(InferenceUtils.get_gpu_names())
             if requested is None:
                 replicas = available if available > 0 else 1
             elif available > 0 and requested > available:

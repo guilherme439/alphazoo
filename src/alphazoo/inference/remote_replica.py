@@ -31,6 +31,14 @@ class RemoteInferenceReplica(IInferenceReplica):
         self._run_future = self._actor.start.remote()
 
     @override
+    def alive(self) -> None:
+        if self._run_future is None:
+            return
+        finished, _ = ray.wait([self._run_future], timeout=0)
+        if finished:
+            ray.get(finished)  # propagate exception if the replica exited early
+
+    @override
     def stop(self) -> None:
         self._actor.stop.remote()
         if self._run_future is not None:

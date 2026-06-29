@@ -41,6 +41,10 @@ class LpcInferenceReplica(IInferenceReplica):
         pass
 
     @override
+    def alive(self) -> None:
+        pass
+
+    @override
     def stop(self) -> None:
         pass
 

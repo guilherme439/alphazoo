@@ -1,17 +1,52 @@
+import logging
 from typing import Any, Callable
 
+import ray
 import torch
 from ray.util import ActorPool
 from torch import Tensor, nn
 
-from ..inference.iinference_client import IInferenceClient
 from .loss_functions import LossFunctions
 
 type LossFunction = Callable[[Tensor, Tensor], Tensor]
 
+logger = logging.getLogger("alphazoo")
+
 
 class CommonUtils:
 
+    @staticmethod
+    def ensure_ray_initialized() -> None:
+        if not ray.is_initialized():
+            logger.warning(
+                "Ray was not initialized; AlphaZoo expects ray to be initialized before "
+                "calling train(). Starting a local single-node Ray."
+            )
+            ray.init()
+
+    @staticmethod
+    def count_live_nodes() -> int:
+        return sum(1 for node in ray.nodes() if node["Alive"])
+    
+    @staticmethod
+    def check_interval(step: int, interval: int) -> bool:
+        return interval > 0 and step > 0 and step % interval == 0
+
+    @staticmethod
+    def drain_actor_pool_results(actor_pool: ActorPool, block: bool = False) -> list[Any]:
+        results = []
+        if block:
+            while actor_pool.has_next():
+                results.append(actor_pool.get_next_unordered())
+        else:
+            while True:
+                try:
+                    results.append(actor_pool.get_next_unordered(timeout=0))
+                except (TimeoutError, StopIteration):
+                    break
+
+        return results
+    
     @staticmethod
     def initialize_parameters(model: torch.nn.Module) -> None:
         for name, param in model.named_parameters():
@@ -41,42 +76,4 @@ class CommonUtils:
             case _:
                 raise ValueError(f"Unknown value loss: {choice}")
 
-    @staticmethod
-    def check_interval(step: int, interval: int) -> bool:
-        return interval > 0 and step > 0 and step % interval == 0
-
-    @staticmethod
-    def distribute_clients(
-        inference_clients: list[IInferenceClient],
-        num_gamers: int,
-        threads_per_gamer: int,
-        num_reanalysers: int,
-        threads_per_reanalyser: int,
-    ) -> tuple[list[list[IInferenceClient]], list[list[IInferenceClient]]]:
-        gamer_clients: list[list[IInferenceClient]] = []
-        for i in range(num_gamers):
-            start = i * threads_per_gamer
-            gamer_clients.append(inference_clients[start : start + threads_per_gamer])
-
-        offset = num_gamers * threads_per_gamer
-        reanalyser_clients: list[list[IInferenceClient]] = []
-        for i in range(num_reanalysers):
-            start = offset + i * threads_per_reanalyser
-            reanalyser_clients.append(inference_clients[start : start + threads_per_reanalyser])
-
-        return gamer_clients, reanalyser_clients
-
-    @staticmethod
-    def drain_actor_pool_results(actor_pool: ActorPool, block: bool = False) -> list[Any]:
-        results = []
-        if block:
-            while actor_pool.has_next():
-                results.append(actor_pool.get_next_unordered())
-        else:
-            while True:
-                try:
-                    results.append(actor_pool.get_next_unordered(timeout=0))
-                except (TimeoutError, StopIteration):
-                    break
-
-        return results
+    

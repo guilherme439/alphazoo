@@ -2,9 +2,9 @@ from typing import Any, Optional
 
 import torch
 
+from .._internal_utils.training import TrainingUtils
 from ..ialphazoo_game import IAlphazooGame
 from .game_encoder import GameEncoder
-from .targets import policy_from_root_visits
 
 
 class GameRecord:
@@ -32,7 +32,7 @@ class GameRecord:
             self._games.append(self._game_encoder.encode(game))
 
     def store_visit_counts(self, root_node: Any) -> None:
-        self._policies.append(policy_from_root_visits(root_node, self.num_actions))
+        self._policies.append(TrainingUtils.policy_from_root_visits(root_node, self.num_actions))
 
     def set_terminal_value(self, value: float) -> None:
         self._terminal_value = value

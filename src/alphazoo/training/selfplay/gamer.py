@@ -4,14 +4,14 @@ from typing import Optional
 
 import ray
 
-from ..configs.search_config import SearchConfig
-from ..ialphazoo_game import IAlphazooGame
-from ..inference.iinference_client import IInferenceClient
-from ..metrics import MetricsRecorder
-from ..search.explorer import Explorer
-from ..search.mcts.node import Node
-from .game_encoder import GameEncoder
-from .game_record import GameRecord
+from ...configs.search_config import SearchConfig
+from ...ialphazoo_game import IAlphazooGame
+from ...inference.iinference_client import IInferenceClient
+from ...metrics import MetricsRecorder
+from ...search.explorer import Explorer
+from ...search.mcts.node import Node
+from ..game_encoder import GameEncoder
+from ..game_record import GameRecord
 
 
 @ray.remote(scheduling_strategy="SPREAD", max_concurrency=2)

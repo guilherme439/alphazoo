@@ -18,6 +18,9 @@ class IInferenceReplica(ABC):
     def start(self) -> None: ...
 
     @abstractmethod
+    def alive(self) -> None: ...
+
+    @abstractmethod
     def stop(self) -> None: ...
 
     @abstractmethod

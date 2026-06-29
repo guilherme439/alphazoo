@@ -4,9 +4,9 @@ from typing import Optional
 import ray
 from ray.actor import ActorHandle
 
-from ..configs.replay_buffer_config import ReanalyseConfig
-from ..inference.iinference_client import IInferenceClient
-from .game_encoder import GameEncoder
+from ...configs.replay_buffer_config import ReanalyseConfig
+from ...inference.iinference_client import IInferenceClient
+from ..game_encoder import GameEncoder
 from .reanalyser import Reanalyser, ReanalyseRequest, ReanalyseResult
 
 
@@ -44,8 +44,13 @@ class ReanalyseCoordinator:
             worker.run.remote(coordinator_handle) for worker in self._workers
         ]
 
-    def get_workers(self) -> list[ActorHandle]:
-        return self._workers
+    def alive(self) -> None:
+        finished, _ = ray.wait(self._run_futures, timeout=0)
+        if finished:
+            ray.get(finished)  # propagate exceptions from workers that exited early
+
+    def get_pids(self) -> list[int]:
+        return ray.get([worker.get_pid.remote() for worker in self._workers])
 
     def enqueue(self, requests: list[ReanalyseRequest]) -> None:
         for request in requests:

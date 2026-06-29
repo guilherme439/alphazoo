@@ -1,6 +1,6 @@
 from typing import Optional
 
-from ..._internal_utils.inference import InferenceUtils
+from ..._internal_utils.common import CommonUtils
 from ...configs.alphazoo_config import CacheConfig, RecurrentConfig
 from ...ialphazoo_game import IAlphazooGame
 from ...networks.model_host import ModelHost
@@ -23,7 +23,7 @@ class IpcInferenceServer(InferenceServer):
         recurrent_config: Optional[RecurrentConfig] = None,
         inference_gpus: Optional[int] = None,
     ) -> None:
-        InferenceUtils.ensure_ray_initialized()
+        CommonUtils.ensure_ray_initialized()
         gpus_per_replica = 1 if inference_host.device().startswith("cuda") else 0
         num_replicas = self._resolve_replica_count(inference_gpus, gpus_per_replica, len(worker_client_counts))
 
