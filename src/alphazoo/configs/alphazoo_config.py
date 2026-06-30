@@ -73,6 +73,7 @@ class LearningConfig:
     normalize_ce: bool = False
     gradient_clip: Optional[float] = None
     learning_method: Literal["samples", "epochs"] = "samples"
+    early_fill_buffer: bool = False
     samples: SamplesConfig = field(default_factory=SamplesConfig)
     epochs: EpochsConfig = field(default_factory=EpochsConfig)
 

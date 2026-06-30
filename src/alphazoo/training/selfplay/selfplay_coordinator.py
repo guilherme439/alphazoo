@@ -47,8 +47,13 @@ class SelfPlayCoordinator:
 
     def play_step(self) -> list[GameRecord]:
         if self._mode == "sequential":
-            return self._play_sequential(self._running_config.sequential)
-        return self._wait_asynchronous(self._running_config.asynchronous)
+            return self._play_sequential_step(self._running_config.sequential)
+        return self._wait_asynchronous_step(self._running_config.asynchronous)
+
+    def gather_games(self) -> list[GameRecord]:
+        if self._mode == "sequential":
+            return self._gather_sequential()
+        return self._gather_asynchronous()
 
     def collect_completed_games(self) -> list[GameRecord]:
         per_gamer: list[list[GameRecord]] = ray.get(
@@ -77,18 +82,23 @@ class SelfPlayCoordinator:
     def get_metrics(self) -> list[dict]:
         return ray.get([gamer.get_metrics.remote() for gamer in self._gamers])
 
-    def _play_sequential(self, config: SequentialConfig) -> list[GameRecord]:
-        num_games_per_task = 1
-        for _ in range(config.num_games_per_step):
-            self._pool.submit(lambda gamer, _: gamer.play_games.remote(num_games_per_task), None)
+    def _play_sequential_step(self, config: SequentialConfig) -> list[GameRecord]:
+        return self._play_n_games_sequential(config.num_games_per_step, "Self-play ")
+    
+    def _gather_sequential(self) -> list[GameRecord]:
+        return self._play_n_games_sequential(len(self._gamers), "Gathering games ")
+
+    def _play_n_games_sequential(self, num_games: int, description: str) -> list[GameRecord]:
+        for _ in range(num_games):
+            self._pool.submit(lambda gamer, _: gamer.play_games.remote(1), None)
 
         records: list[GameRecord] = []
-        with Spinner("Self-play "):
+        with Spinner(description):
             while self._pool.has_next():
                 records.extend(self._pool.get_next_unordered())
         return records
 
-    def _wait_asynchronous(self, config: AsynchronousConfig) -> list[GameRecord]:
+    def _wait_asynchronous_step(self, config: AsynchronousConfig) -> list[GameRecord]:
         deadline = time.time() + config.update_delay
         poll_interval = 0.1
         collected: list[GameRecord] = []
@@ -101,6 +111,15 @@ class SelfPlayCoordinator:
                 time.sleep(poll_interval)
 
         return collected
+
+    def _gather_asynchronous(self) -> list[GameRecord]:
+        poll_interval = 0.1
+        with Spinner("Gathering games "):
+            while True:
+                collected = self.collect_completed_games()
+                if collected:
+                    return collected
+                time.sleep(poll_interval)
 
     def _collected_min_games(self, collected: list[GameRecord], min_games: int) -> bool:
         return (min_games is not None) and (len(collected) >= min_games)

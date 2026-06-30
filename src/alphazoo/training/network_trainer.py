@@ -20,7 +20,6 @@ logger = logging.getLogger("alphazoo")
 
 class NetworkTrainer:
 
-    MAX_SAMPLES_BATCH_SIZE_RATIO = 0.05
     MAX_EPOCHS_BATCH_SIZE_RATIO = 0.20
 
     def __init__(
@@ -90,18 +89,8 @@ class NetworkTrainer:
                 self._train_with_epochs(effective_batch_size, batches_per_epoch, epochs)
 
             case "samples":
-                effective_batch_size = self._capped_batch_size(
-                    self.config.samples.batch_size, replay_size, self.MAX_SAMPLES_BATCH_SIZE_RATIO,
-                )
+                effective_batch_size = min(self.config.samples.batch_size, replay_size)
                 num_samples = self.config.samples.num_samples
-                total_drawn_positions = effective_batch_size * num_samples
-                if total_drawn_positions > replay_size:
-                    logger.warning(
-                        f"\nWARNING: Oversampling -> "
-                        f"batch_size ({effective_batch_size}) * num_samples ({num_samples}) = {total_drawn_positions} "
-                        f"exceeds replay buffer size ({replay_size})"
-                    )
-                
                 logger.info(f"\nTotal updates: {num_samples} | Batch size: {effective_batch_size}")
                 self._train_with_samples(effective_batch_size, num_samples)
 

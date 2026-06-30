@@ -72,6 +72,7 @@ AlphaZooConfig
 │   ├── normalize_ce
 │   ├── gradient_clip
 │   ├── learning_method
+│   ├── early_fill_buffer
 │   ├── samples: SamplesConfig
 │   │   ├── batch_size
 │   │   ├── num_samples
@@ -236,6 +237,7 @@ The configured `batch_size` is automatically reduced when it would otherwise be 
 | `normalize_ce` | `bool` | `false` | Normalize cross-entropy loss by the entropy of the target distribution. |
 | `gradient_clip` | `float` \| `null` | `null` | When set, clip the gradient L2 norm to this value (via `clip_grad_norm_`) before each optimizer step; `null` disables clipping. |
 | `learning_method` | `"samples"` \| `"epochs"` | `"samples"` | How training data is drawn from the replay buffer each step. |
+| `early_fill_buffer` | `bool` | `false` | When true, run self-play until the buffer holds `batch_size × num_samples` positions (samples mode) before the first training step. |
 
 ### Replay Buffer
 

@@ -201,6 +201,10 @@ class AlphaZoo:
             self._log_training_run_info(running_config, cache_config)
 
             self.current_step = self.starting_step
+
+            if self.config.learning.early_fill_buffer:
+                self._early_fill_buffer()
+
             steps_to_run = range(self.starting_step, training_steps) # 0-indexed
             for step in steps_to_run:
                 self._alive()
@@ -429,6 +433,22 @@ class AlphaZoo:
         self._profiler.attach("gamer", self._selfplay_coordinator.get_pids())
         if self._reanalyse_enabled:
             self._profiler.attach("reanalyser", ray.get(self._reanalyse_coordinator.get_pids.remote()))
+
+    def _early_fill_buffer(self) -> None:
+        learning = self.config.learning
+        if learning.learning_method == "samples":
+            target = learning.samples.batch_size * learning.samples.num_samples
+        else:
+            target = learning.epochs.batch_size
+        target = min(target, learning.replay_buffer.window_size)
+
+        logger.info(f"\nEarly buffer fill: gathering {target} positions before training starts...\n")
+        while len(self.replay_buffer) < target:
+            self._alive()
+            records = self._selfplay_coordinator.gather_games()
+            for record in records:
+                self.replay_buffer.save_game_record(record, self.current_step)
+            logger.info(f"Replay buffer: {len(self.replay_buffer)}/{target} positions")
 
     def _run_selfplay(self) -> int:
         records = self._selfplay_coordinator.play_step()

@@ -20,11 +20,12 @@ learning:
     window_size: 500
     leak_chance: 0.0
   learning_method: "samples"
+  early_fill_buffer: true
   value_loss: "AE"
   policy_loss: "CE"
   normalize_ce: true
   samples:
-    batch_size: 16
+    batch_size: 20
     num_samples: 8
     late_heavy: true
 
