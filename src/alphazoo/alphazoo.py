@@ -25,6 +25,7 @@ from ._internal_utils.optimization import OptimizationUtils
 from ._internal_utils.common import CommonUtils
 from ._internal_utils.checkpoint import CheckpointUtils
 from ._internal_utils.env import EnvUtils
+from ._internal_utils.progress import Spinner
 from .metrics import MetricsRecorder, MetricsStore
 from .networks.interfaces import AlphaZooNet, AlphaZooRecurrentNet
 from .networks.model_host import ModelHost
@@ -442,13 +443,13 @@ class AlphaZoo:
             target = learning.epochs.batch_size
         target = min(target, learning.replay_buffer.window_size)
 
-        logger.info(f"\nEarly buffer fill: gathering {target} positions before training starts...\n")
-        while len(self.replay_buffer) < target:
-            self._alive()
-            records = self._selfplay_coordinator.gather_games()
-            for record in records:
-                self.replay_buffer.save_game_record(record, self.current_step)
-            logger.info(f"Replay buffer: {len(self.replay_buffer)}/{target} positions")
+        with Spinner(f"Early buffer fill 0/{target} positions") as spinner:
+            while len(self.replay_buffer) < target:
+                self._alive()
+                records = self._selfplay_coordinator.gather_games()
+                for record in records:
+                    self.replay_buffer.save_game_record(record, self.current_step)
+                spinner.description = f"Early buffer fill {len(self.replay_buffer)}/{target} positions"
 
     def _run_selfplay(self) -> int:
         records = self._selfplay_coordinator.play_step()
