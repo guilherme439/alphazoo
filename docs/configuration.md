@@ -81,6 +81,8 @@ AlphaZooConfig
 │       └── learning_epochs
 ├── optimizer: OptimizerConfig
 │   ├── type
+│   ├── adam: AdamConfig
+│   │   └── weight_decay
 │   └── sgd: SGDConfig
 │       ├── weight_decay
 │       ├── momentum
@@ -106,7 +108,9 @@ AlphaZooConfig
         ├── number_of_softmax_moves
         ├── epsilon_softmax_exploration
         ├── epsilon_random_exploration
+        ├── softmax_temperature
         ├── value_factor
+        ├── prior_temperature
         ├── root_exploration_distribution
         ├── root_exploration_fraction
         └── root_dist_alpha
@@ -284,7 +288,15 @@ Used when `learning_method` is `"epochs"`. Iterates over the entire replay buffe
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `type` | `"Adam"` \| `"SGD"` | `"Adam"` | Which optimizer to use. Adam uses default PyTorch settings. SGD settings are configured below. |
+| `type` | `"Adam"` \| `"SGD"` | `"Adam"` | Which optimizer to use. Adam and SGD settings are configured below. |
+
+### Adam
+
+Only used when `type` is `"Adam"`.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `weight_decay` | `float` | `0.0` | Decoupled (AdamW) weight-decay coefficient. |
 
 ### SGD
 
@@ -381,10 +393,12 @@ Controls move selection and noise injection during self-play.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `number_of_softmax_moves` | `int` | `15` | Number of moves at the start of each game where actions are sampled proportionally to visit counts (softmax). After this, the most-visited action is always chosen. |
-| `epsilon_softmax_exploration` | `float` | `0.04` | Temperature for softmax move selection. Higher values make selection more uniform. |
-| `epsilon_random_exploration` | `float` | `0.003` | Probability of selecting a completely random action instead of using MCTS. |
-| `value_factor` | `float` | `1.0` | Scaling factor applied to the value estimate in the MCTS backup. |
+| `number_of_softmax_moves` | `int` | `15` | Number of opening moves where the action is sampled from the visit counts (scaled by `softmax_temperature`). After these, the epsilon scheme below applies. |
+| `epsilon_softmax_exploration` | `float` | `0.04` | After `number_of_softmax_moves`, probability of sampling from the visit counts instead of taking the most-visited action. |
+| `epsilon_random_exploration` | `float` | `0.003` | After `number_of_softmax_moves`, probability of taking a random action. Checked only when the softmax draw does not fire. |
+| `softmax_temperature` | `float` | `1.0` | Temperature for visit-count sampling: action drawn proportionally to `visit_count ** (1 / softmax_temperature)`. `0` takes the most-visited action. |
+| `value_factor` | `float` | `1.0` | Scaling factor on the child value term in the PUCT score. |
+| `prior_temperature` | `float` | `1.0` | Temperature on the network policy prior at each expansion: `softmax(logits / prior_temperature)`. Higher flattens it, lower sharpens it. |
 | `root_exploration_distribution` | `"gamma"` \| `"dirichlet"` | `"gamma"` | Distribution used for root exploration noise. |
 | `root_exploration_fraction` | `float` | `0.20` | Fraction of the prior replaced by exploration noise at the root node. |
 | `root_dist_alpha` | `float` | `0.15` | Alpha parameter of the noise distribution. Lower values produce spikier noise (more concentrated on fewer actions). |

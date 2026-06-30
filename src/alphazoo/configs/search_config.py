@@ -33,7 +33,9 @@ class ExplorationConfig:
     number_of_softmax_moves: int = 15
     epsilon_softmax_exploration: float = 0.04
     epsilon_random_exploration: float = 0.003
+    softmax_temperature: float = 1.0
     value_factor: float = 1.0
+    prior_temperature: float = 1.0
     root_exploration_distribution: Literal["gamma", "dirichlet"] = "gamma"
     root_exploration_fraction: float = 0.20
     root_dist_alpha: float = 0.15

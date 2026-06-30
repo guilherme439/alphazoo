@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 import torch
-from torch.optim import SGD, Adam, Optimizer
+from torch.optim import SGD, AdamW, Optimizer
 from torch.optim.lr_scheduler import LambdaLR, LinearLR, LRScheduler, MultiStepLR
 
 from alphazoo.configs.alphazoo_config import AlphaZooConfig
@@ -30,7 +30,7 @@ class OptimizationUtils:
     def create_optimizer(model: torch.nn.Module, learning_rate: float, config: OptimizerConfig) -> Optimizer:
         match config.type:
             case "Adam":
-                return Adam(model.parameters(), lr=learning_rate)
+                return AdamW(model.parameters(), lr=learning_rate, weight_decay=config.adam.weight_decay)
             case "SGD":
                 return SGD(
                     model.parameters(),

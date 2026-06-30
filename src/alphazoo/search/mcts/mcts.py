@@ -6,7 +6,6 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Callable, Optional
 
 import numpy as np
-from scipy.special import softmax
 
 from ...configs.search_config import SearchConfig
 from ...ialphazoo_game import IAlphazooGame
@@ -201,16 +200,16 @@ class MCTS(ABC):
         return max_pair[1]
 
     def _softmax_action(self, visit_counts: list[tuple[int, int]]) -> int:
-        counts: list[int] = []
-        actions: list[int] = []
-        for count, action in visit_counts:
-            counts.append(count)
-            actions.append(action)
+        actions = [action for _, action in visit_counts]
+        counts = np.array([count for count, _ in visit_counts], dtype=np.float64)
 
-        final_counts = softmax(counts)
+        temperature: float = self.config.exploration.softmax_temperature
+        max_count = counts.max()
+        if temperature <= 0.0 or max_count <= 0.0:
+            return int(actions[int(counts.argmax())])
 
-        probs = np.asarray(final_counts, dtype=np.float64).astype('float64')
-        probs /= np.sum(probs) # re-normalize to improve precison
+        scaled = (counts / max_count) ** (1.0 / temperature)
+        probs = scaled / scaled.sum()
         return int(self.rng.choice(actions, p=probs))
 
     def _add_exploration_noise(self, node: Node) -> None:

@@ -79,7 +79,12 @@ class AlphazeroMCTS(MCTS):
 
         # Expand the node.
         valid_actions_mask = game.legal_actions_mask()
-        action_probs = softmax(action_probs.flatten())
+
+        logits = action_probs.flatten()
+        temperature: float = self.config.exploration.prior_temperature
+        if temperature != 1.0:
+            logits = logits / temperature
+        action_probs = softmax(logits)
 
         probs = action_probs * valid_actions_mask # Use mask to get only valid moves
         total = np.sum(probs)
